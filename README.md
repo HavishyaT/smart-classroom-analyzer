@@ -25,6 +25,88 @@ The system provides tools for attendance tracking, assignment management, perfor
 - Notifications for assignments, grades, and attendance alerts  
 
 ---
+## System Architecture
+
+The Smart Classroom Analyzer follows a **three-tier architecture** consisting of the Presentation Layer, Application Layer, and Data Layer.
+
+```
+        +-----------------------------+
+        |         Users               |
+        |  Students | Teachers | Admin|
+        +-------------+---------------+
+                      |
+                      |
+                (Web Browser)
+                      |
+                      ▼
+        +-----------------------------+
+        |        Frontend Layer       |
+        |        React.js App         |
+        |  - Dashboard                |
+        |  - Attendance UI            |
+        |  - Assignment Management    |
+        |  - Analytics View           |
+        +-------------+---------------+
+                      |
+                      | REST API
+                      ▼
+        +-----------------------------+
+        |        Backend Layer        |
+        |      Node.js + Express      |
+        |                             |
+        |  Modules:                   |
+        |  - Authentication           |
+        |  - Attendance Service       |
+        |  - Assignment Service       |
+        |  - Grades & Analytics       |
+        |  - Notification Service     |
+        |  - AI Recommendation Engine |
+        +-------------+---------------+
+                      |
+                      |
+                      ▼
+        +-----------------------------+
+        |        Data Layer           |
+        |        PostgreSQL           |
+        |                             |
+        |  Tables:                    |
+        |  - Users                    |
+        |  - Students                 |
+        |  - Attendance               |
+        |  - Assignments              |
+        |  - Grades                   |
+        |  - Activities               |
+        +-----------------------------+
+```
+
+### Architecture Layers
+
+**1. Presentation Layer (Frontend)**  
+- Built using **React.js**
+- Provides dashboards for students, teachers, and administrators
+- Handles user interaction and API communication
+
+**2. Application Layer (Backend)**  
+- Built using **Node.js with Express**
+- Handles business logic
+- Provides REST APIs for the frontend
+- Includes modules for attendance, assignments, analytics, and AI recommendations
+
+**3. Data Layer (Database)**  
+- Uses **PostgreSQL**
+- Stores user data, attendance records, assignments, grades, and activity logs
+
+### Additional Components
+
+- **AI Recommendation Engine**
+  - Analyzes student performance
+  - Suggests personalized learning activities
+
+- **Notification System**
+  - Sends alerts for assignment deadlines
+  - Attendance warnings
+  - Grade updates
+---
 
 ## Technologies Used
 
