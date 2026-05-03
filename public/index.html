@@ -1,0 +1,2029 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>EduCore — Smart Classroom v6</title>
+
+<!--
+  EduCore v6 — KEY CHANGES:
+  ══════════════════════════════════════════════════════════════
+  1. ATTENDANCE: Face recognition REMOVED from attendance flow.
+     Now: Code → GPS → Done (3 steps). Face ID is ONLY for login.
+
+  2. FACULTY-STUDENT CONNECTION:
+     - Each subject is mapped to a specific faculty member.
+     - When faculty grades an assignment, it appears updated in
+       the student's Assignments page immediately (shared LS key).
+     - When faculty approves/rejects a leave, student panel updates.
+     - Assignments page shows which faculty owns each course.
+
+  3. FACE API — LOGIN ONLY:
+     - face-api.js models are fetched from CDN and require an
+       HTTP server (localhost:port or https://...). They do NOT
+       work from file:// due to CORS. Run: python -m http.server
+       or node server.js and open http://localhost:PORT.
+     - Models: TinyFaceDetector + FaceLandmark68 + FaceRecognition
+     - All other Face ID code remains (scan & login, first-time setup).
+
+  4. SERVER.JS: Login bug already fixed (email vs roll_no params).
+     Face vector endpoint fixed. Session code generation improved.
+  ══════════════════════════════════════════════════════════════
+-->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/face-api.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --bg:#080a0d;--surf:#0f1117;--card:#151821;--card2:#1c1f2b;
+  --b:rgba(255,255,255,.06);--b2:rgba(255,255,255,.12);
+  --blue:#3b6bff;--bdim:rgba(59,107,255,.12);--bdim2:rgba(59,107,255,.22);
+  --green:#22c55e;--gdim:rgba(34,197,94,.10);
+  --amber:#f59e0b;--adim:rgba(245,158,11,.10);
+  --red:#ef4444;--rdim:rgba(239,68,68,.10);
+  --purple:#8b5cf6;
+  --t:#f0f1f5;--t2:#9ea3b0;--t3:#5a5f70;--t4:#363b4a;
+  --r:12px;--rs:8px;--rx:5px;
+  --font:'Geist',sans-serif;--serif:'Instrument Serif',serif;--mono:'Geist Mono',monospace;
+  --sb:220px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--t);font-family:var(--font);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{cursor:pointer;font-family:var(--font)}
+input,textarea,select{font-family:var(--font)}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
+a{color:var(--blue);text-decoration:none}
+.screen{display:none;min-height:100vh}
+.screen.on{display:flex}
+#sc-inst{align-items:center;justify-content:center;padding:40px 20px;position:relative;overflow:hidden;flex-direction:column}
+#sc-login{align-items:center;justify-content:center;padding:20px;position:relative;overflow:hidden}
+#sc-app{flex-direction:row}
+.bg-blur{position:absolute;inset:0;background-size:cover;background-position:center;filter:brightness(.15) saturate(.6);transition:background-image .5s;z-index:0}
+.noise{position:absolute;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E");z-index:1;pointer-events:none}
+.inst-wrap{position:relative;z-index:2;max-width:900px;width:100%}
+.brand{display:flex;align-items:center;gap:9px;margin-bottom:36px}
+.logo{width:28px;height:28px;background:var(--blue);border-radius:7px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.logo svg{width:14px;height:14px;fill:#fff}
+.brand-name{font-size:14px;font-weight:600}
+.vtag{font-size:10px;background:var(--bdim);color:var(--blue);border:1px solid var(--bdim2);padding:1px 7px;border-radius:100px;font-weight:600;font-family:var(--mono)}
+.inst-h{font-family:var(--serif);font-size:clamp(34px,5vw,56px);line-height:1.1;letter-spacing:-.02em;margin-bottom:10px}
+.inst-h em{color:var(--t3);font-style:italic}
+.inst-sub{color:var(--t2);font-size:14px;margin-bottom:40px;line-height:1.7;max-width:480px}
+.inst-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:28px}
+.ic{background:rgba(21,24,33,.75);border:1px solid var(--b);border-radius:var(--r);cursor:pointer;transition:all .2s;overflow:hidden;backdrop-filter:blur(14px);position:relative}
+.ic:hover{border-color:var(--b2);transform:translateY(-2px)}
+.ic.sel{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.ic-img{width:100%;height:80px;object-fit:cover;display:block;opacity:.65;transition:.2s}
+.ic:hover .ic-img,.ic.sel .ic-img{opacity:1}
+.ic-body{padding:11px 13px}
+.ic-abbr{font-family:var(--mono);font-size:9px;font-weight:600;color:var(--blue);background:var(--bdim);border:1px solid var(--bdim2);padding:1px 6px;border-radius:var(--rx);display:inline-block;margin-bottom:5px;letter-spacing:.04em}
+.ic-name{font-size:12px;font-weight:600;margin-bottom:1px}
+.ic-loc{font-size:10px;color:var(--t3)}
+.ic-chk{position:absolute;top:7px;right:7px;width:16px;height:16px;background:var(--blue);border-radius:50%;display:none;align-items:center;justify-content:center}
+.ic.sel .ic-chk{display:flex}
+.ic-chk svg{width:8px;height:8px}
+.btn-cont{display:inline-flex;align-items:center;gap:8px;background:var(--blue);color:#fff;border:none;border-radius:var(--rs);padding:11px 26px;font-size:13px;font-weight:600;transition:all .2s}
+.btn-cont:hover{background:#2d5ce8;transform:translateY(-1px);box-shadow:0 8px 20px rgba(59,107,255,.35)}
+.login-shell{display:flex;max-width:840px;width:100%;border:1px solid var(--b2);border-radius:16px;overflow:hidden;position:relative;z-index:2;backdrop-filter:blur(20px)}
+.ll{flex:1;background:rgba(15,17,23,.88);padding:44px 38px;border-right:1px solid var(--b);display:flex;flex-direction:column;justify-content:space-between}
+.ll-inst{display:flex;align-items:center;gap:10px;margin-bottom:32px}
+.ll-img{width:44px;height:44px;border-radius:var(--rs);object-fit:cover;border:1px solid var(--b2)}
+.ll-iname{font-size:13px;font-weight:600}
+.ll-iloc{font-size:11px;color:var(--t3)}
+.ll-q{font-family:var(--serif);font-size:26px;line-height:1.25;margin-bottom:14px}
+.ll-q em{color:var(--t3);font-style:italic}
+.ll-feats{list-style:none}
+.ll-feats li{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--b);font-size:11px;color:var(--t3)}
+.ll-feats li:last-child{border:none}
+.fdot{width:5px;height:5px;border-radius:50%;background:var(--blue);flex-shrink:0}
+.lr{width:340px;background:rgba(8,10,13,.92);padding:44px 34px;overflow-y:auto}
+.lr-eye{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:4px}
+.lr-title{font-size:20px;font-weight:600;margin-bottom:2px}
+.lr-sub{font-size:12px;color:var(--t3);margin-bottom:20px}
+.atabs{display:flex;background:var(--card);border:1px solid var(--b);border-radius:var(--rs);padding:3px;margin-bottom:18px}
+.atab{flex:1;padding:7px;border:none;border-radius:6px;background:transparent;color:var(--t3);font-size:11px;font-weight:600;transition:all .18s}
+.atab.on{background:var(--card2);color:var(--t)}
+.fld label{display:block;font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;margin-top:10px}
+.fi{width:100%;background:var(--card);border:1px solid var(--b);border-radius:var(--rs);padding:9px 11px;color:var(--t);font-size:13px;outline:none;transition:border-color .18s}
+.fi:focus{border-color:var(--blue)}
+.fi option{background:var(--card)}
+.btn-p{width:100%;background:var(--blue);color:#fff;border:none;border-radius:var(--rs);padding:10px;font-size:13px;font-weight:600;transition:all .18s;margin-top:13px}
+.btn-p:hover:not(:disabled){background:#2d5ce8}
+.btn-p:disabled{opacity:.55;cursor:not-allowed}
+.err{background:var(--rdim);border:1px solid rgba(239,68,68,.2);border-radius:var(--rx);padding:8px 10px;font-size:11px;color:var(--red);margin-top:8px;display:none;white-space:pre-line}
+.hint{font-size:11px;color:var(--t3);text-align:center;margin-top:9px}
+.hint span{color:var(--blue)}
+#pnl-face{display:none}
+.face-subtabs{display:flex;gap:3px;background:var(--card);border:1px solid var(--b);border-radius:var(--rs);padding:3px;margin-bottom:14px}
+.fstab{flex:1;padding:6px;border:none;border-radius:5px;background:transparent;color:var(--t3);font-size:10px;font-weight:600;transition:all .18s}
+.fstab.on{background:var(--card2);color:var(--t)}
+.cam-wrap{position:relative;border-radius:var(--r);overflow:hidden;background:#000;border:1px solid var(--b2);aspect-ratio:4/3;margin-bottom:9px}
+.cam-wrap video{width:100%;height:100%;object-fit:cover;display:block}
+.face-ring-ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.fring{width:130px;height:130px;border-radius:50%;border:2px solid rgba(59,107,255,.6);transition:border-color .3s,border-width .3s}
+.fring.detected{border-color:var(--green);box-shadow:0 0 0 4px rgba(34,197,94,.2)}
+.fring::after{content:'';position:absolute;inset:-7px;border-radius:50%;border:1px dashed rgba(59,107,255,.22);animation:rot 8s linear infinite}
+.fprog{position:absolute;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;gap:9px;border-radius:var(--r)}
+.fprog.on{display:flex}
+.fps{width:44px;height:44px;border-radius:50%;border:2px solid var(--b2);border-top-color:var(--blue);animation:spin .8s linear infinite}
+.fpbw{width:120px;height:3px;background:var(--b);border-radius:2px;overflow:hidden}
+.fpb{height:100%;background:var(--blue);border-radius:2px;width:0%;transition:width .4s}
+.fptxt{font-size:11px;color:var(--t2);font-weight:500;text-align:center;padding:0 10px}
+.fst{font-size:11px;color:var(--t3);text-align:center;margin:5px 0 9px}
+.fst.scan{color:var(--blue);animation:blink 1.2s ease-in-out infinite}
+.fst.ok{color:var(--green)}
+.fst.err{color:var(--red);animation:none}
+.enroll-note{background:var(--adim);border:1px solid rgba(245,158,11,.2);border-radius:var(--rs);padding:9px 11px;font-size:11px;color:var(--amber);display:none;margin-top:9px;line-height:1.6}
+.pw-banner{background:var(--bdim);border:1px solid var(--bdim2);border-radius:var(--rs);padding:9px 13px;font-size:12px;color:var(--t2);display:none;margin-bottom:13px;align-items:center;gap:9px}
+.pw-banner.on{display:flex}
+.cam-label{position:absolute;top:7px;left:7px;background:rgba(0,0,0,.65);color:var(--amber);font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 7px;border-radius:100px;font-family:var(--mono);z-index:2}
+.face-status-ov{position:absolute;bottom:7px;left:0;right:0;text-align:center;z-index:3;pointer-events:none}
+.face-status-pill{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;padding:3px 10px;border-radius:100px;font-family:var(--mono);transition:all .3s}
+.face-status-pill.scanning{background:rgba(59,107,255,.7);color:#fff}
+.face-status-pill.detected{background:rgba(34,197,94,.85);color:#000}
+.face-status-pill.no-face{background:rgba(239,68,68,.7);color:#fff}
+.model-banner{display:flex;align-items:center;gap:8px;padding:8px 11px;border-radius:var(--rs);font-size:11px;font-weight:500;margin-bottom:12px;border:1px solid transparent}
+.model-banner.loading{background:var(--adim);color:var(--amber);border-color:rgba(245,158,11,.2)}
+.model-banner.ready{background:var(--gdim);color:var(--green);border-color:rgba(34,197,94,.2)}
+.model-banner.failed{background:var(--rdim);color:var(--red);border-color:rgba(239,68,68,.2)}
+.model-spinner{width:11px;height:11px;border-radius:50%;border:1.5px solid rgba(245,158,11,.35);border-top-color:var(--amber);animation:spin .7s linear infinite;flex-shrink:0}
+.model-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.face-http-notice{background:var(--adim);border:1px solid rgba(245,158,11,.3);border-radius:var(--rs);padding:10px 12px;font-size:11px;color:var(--amber);margin-bottom:12px;line-height:1.7}
+.sidebar{position:fixed;top:0;left:0;width:var(--sb);height:100vh;background:var(--surf);border-right:1px solid var(--b);display:flex;flex-direction:column;z-index:200;overflow:hidden}
+.sb-top{padding:16px 16px 13px;border-bottom:1px solid var(--b);display:flex;align-items:center;gap:9px;flex-shrink:0}
+.sb-bn{font-size:13px;font-weight:600}
+.sb-bs{font-size:10px;color:var(--t3)}
+.sb-inst{padding:11px 16px;border-bottom:1px solid var(--b);flex-shrink:0}
+.sb-abbr{font-family:var(--mono);font-size:9px;font-weight:600;color:var(--blue);background:var(--bdim);border:1px solid var(--bdim2);padding:1px 6px;border-radius:var(--rx);display:inline-block;margin-bottom:2px;letter-spacing:.04em}
+.sb-in{font-size:11px;font-weight:600;line-height:1.3}
+.sb-il{font-size:10px;color:var(--t3)}
+.sb-role{display:inline-flex;align-items:center;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:100px;margin-top:4px}
+.sb-role.student{background:var(--bdim);color:var(--blue);border:1px solid var(--bdim2)}
+.sb-role.faculty{background:var(--adim);color:var(--amber);border:1px solid rgba(245,158,11,.2)}
+nav{flex:1;overflow-y:auto;padding:8px}
+.nsec{font-size:9px;font-weight:700;color:var(--t4);letter-spacing:.1em;text-transform:uppercase;padding:8px 8px 4px}
+.ni{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:var(--rx);cursor:pointer;color:var(--t3);font-size:12px;font-weight:500;margin-bottom:1px;transition:all .18s;position:relative}
+.ni:hover{background:var(--card);color:var(--t2)}
+.ni.on{background:var(--bdim);color:var(--blue);font-weight:600}
+.ni svg{width:14px;height:14px;flex-shrink:0}
+.nb{margin-left:auto;font-size:9px;font-weight:700;background:var(--red);color:#fff;padding:1px 5px;border-radius:100px;min-width:16px;text-align:center}
+.sb-foot{border-top:1px solid var(--b);padding:12px 14px;flex-shrink:0}
+.sb-user{display:flex;align-items:center;gap:8px}
+.sb-av{width:30px;height:30px;border-radius:50%;background:var(--bdim2);border:1px solid var(--bdim2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--blue);flex-shrink:0}
+.sb-un{font-size:12px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-ue{font-size:10px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn-lo{background:none;border:none;color:var(--t3);padding:4px;border-radius:5px;transition:all .18s;display:flex}
+.btn-lo:hover{color:var(--red);background:var(--rdim)}
+.btn-lo svg{width:14px;height:14px}
+.main{margin-left:var(--sb);min-height:100vh;padding:30px 32px;flex:1}
+.page{display:none;animation:fadeup .22s ease}
+.page.on{display:block}
+@keyframes fadeup{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes rot{to{transform:rotate(360deg)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.ph{margin-bottom:24px}
+.ph-title{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-bottom:3px}
+.ph-sub{font-size:12px;color:var(--t3)}
+.card{background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:18px;margin-bottom:12px}
+.card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.card-t{font-size:13px;font-weight:600}
+.sg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:13px}
+.sc{background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:15px}
+.sc-l{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+.sc-v{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1;margin-bottom:2px}
+.sc-s{font-size:10px;color:var(--t3)}
+.cbl{color:var(--blue)}.cgr{color:var(--green)}.cam{color:var(--amber)}.crd{color:var(--red)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.lbl{display:block;font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;margin-top:10px}
+.inp{width:100%;background:var(--surf);border:1px solid var(--b);border-radius:var(--rs);padding:9px 11px;color:var(--t);font-size:12px;outline:none;transition:border-color .18s;resize:vertical}
+.inp:focus{border-color:var(--blue)}
+.inp::placeholder{color:var(--t4)}
+textarea.inp{min-height:66px}
+select.inp option{background:var(--surf)}
+.btn{border:none;border-radius:var(--rs);padding:8px 16px;font-size:12px;font-weight:600;transition:all .18s;cursor:pointer}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.bbl{background:var(--blue);color:#fff}.bbl:hover:not(:disabled){background:#2d5ce8}
+.bgr{background:var(--green);color:#000}.bgr:hover:not(:disabled){opacity:.88}
+.brd{background:var(--red);color:#fff}.brd:hover:not(:disabled){opacity:.88}
+.bol{background:transparent;border:1px solid var(--b2);color:var(--t2)}.bol:hover:not(:disabled){background:var(--card2)}
+.bam{background:var(--amber);color:#000}.bam:hover:not(:disabled){opacity:.88}
+.bsm{padding:5px 10px;font-size:11px}
+.bfw{width:100%}
+.badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:100px}
+.bb{background:var(--bdim);color:var(--blue);border:1px solid var(--bdim2)}
+.bg{background:var(--gdim);color:var(--green);border:1px solid rgba(34,197,94,.2)}
+.ba{background:var(--adim);color:var(--amber);border:1px solid rgba(245,158,11,.2)}
+.br{background:var(--rdim);color:var(--red);border:1px solid rgba(239,68,68,.2)}
+.ok{background:var(--gdim);border:1px solid rgba(34,197,94,.2);border-radius:var(--rx);padding:7px 10px;font-size:11px;color:var(--green);display:none;margin-top:7px}
+.er{background:var(--rdim);border:1px solid rgba(239,68,68,.2);border-radius:var(--rx);padding:7px 10px;font-size:11px;color:var(--red);display:none;margin-top:7px;white-space:pre-line}
+.alert{display:none;align-items:center;gap:9px;padding:10px 14px;border-radius:var(--rs);margin-bottom:13px;font-size:12px}
+.alert.on{display:flex}
+.adanger{background:var(--rdim);border:1px solid rgba(239,68,68,.2);color:var(--red)}
+.ri{display:flex;align-items:center;gap:9px;padding:8px 11px;background:var(--surf);border:1px solid var(--b);border-radius:var(--rs);margin-bottom:5px;font-size:12px;transition:border-color .18s}
+.ri:hover{border-color:var(--b2)}
+.ld{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 1.5s ease-in-out infinite;margin-right:3px}
+.empty{color:var(--t3);font-size:12px;text-align:center;padding:22px 0}
+.pw{background:var(--b);border-radius:100px;height:5px;overflow:hidden;margin:5px 0}
+.pb{height:100%;border-radius:100px;background:var(--blue);transition:width .8s}
+.pb.gr{background:var(--green)}.pb.rd{background:var(--red)}
+.bar-row{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.bar-lbl{width:130px;color:var(--t3);text-align:right;flex-shrink:0;font-size:11px}
+.bar-tr{flex:1;height:18px;background:var(--surf);border-radius:4px;overflow:hidden;border:1px solid var(--b)}
+.bar-fi{height:100%;border-radius:3px;background:var(--blue);transition:width .8s}
+.bar-fi.low{background:var(--red)}
+.bar-val{width:34px;font-weight:700;font-family:var(--mono);font-size:11px;color:var(--t2)}
+.ld2{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px}
+.ws{background:var(--card);border:1px solid var(--b);border-left:2px solid var(--blue);border-radius:var(--r);padding:20px 24px;margin-bottom:13px;display:flex;align-items:center;justify-content:space-between}
+.ws-n{font-size:20px;font-weight:600;letter-spacing:-.01em;margin-bottom:2px}
+.ws-s{font-size:12px;color:var(--t3)}
+.cache{display:flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--b);border-radius:var(--rs);padding:6px 11px;margin-bottom:13px;font-size:11px;color:var(--t3)}
+.cd{width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 2s infinite;flex-shrink:0}
+.cl{color:var(--green);font-weight:600;font-family:var(--mono)}
+.att-steps{display:flex;align-items:center;justify-content:center;gap:0;margin-bottom:26px}
+.step{display:flex;flex-direction:column;align-items:center;gap:4px}
+.sd{width:28px;height:28px;border-radius:50%;border:1.5px solid var(--b2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--t3);font-family:var(--mono);transition:all .3s}
+.sd.active{border-color:var(--blue);color:var(--blue);background:var(--bdim)}
+.sd.done{border-color:var(--green);background:var(--green);color:#000}
+.sl{width:60px;height:1px;background:var(--b2);margin-top:-12px;transition:background .3s}
+.sl.done{background:var(--green)}
+.sl-lbl{font-size:9px;color:var(--t3)}
+.att-ph{text-align:center;padding:14px 8px}
+.ph-tit{font-size:15px;font-weight:600;margin-bottom:5px}
+.gps-inf{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:500;padding:5px 12px;border-radius:100px;margin-bottom:13px}
+.gps-loading{background:var(--adim);color:var(--amber);border:1px solid rgba(245,158,11,.2)}
+.gps-ok{background:var(--gdim);color:var(--green);border:1px solid rgba(34,197,94,.2)}
+.att-table{width:100%;border-collapse:collapse;font-size:12px}
+.att-table th{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;text-align:left;padding:7px 11px;border-bottom:1px solid var(--b)}
+.att-table td{padding:7px 11px;border-bottom:1px solid var(--b)}
+.att-table tr:last-child td{border:none}
+.att-table tr:hover td{background:var(--card2)}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}
+.cal-mo{font-size:15px;font-weight:600}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cdh{font-size:10px;font-weight:600;color:var(--t3);text-align:center;padding:5px 2px;text-transform:uppercase;letter-spacing:.04em}
+.cd2{aspect-ratio:1;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;cursor:pointer;position:relative;transition:background .18s}
+.cd2:hover{background:var(--card2)}
+.cd2.today{background:var(--blue);color:#fff;font-weight:700}
+.cd2.holiday{background:var(--rdim);color:var(--red)}
+.cd2.exam{background:var(--adim);color:var(--amber)}
+.cd2.leave{background:var(--gdim);color:var(--green)}
+.cd2.other-m{color:var(--t4)}
+.cal-dot{width:3px;height:3px;border-radius:50%;background:currentColor;position:absolute;bottom:2px}
+.circ{border:1px solid var(--b);border-left:2px solid var(--amber);border-radius:var(--rs);padding:11px 13px;margin-bottom:7px;background:var(--card)}
+.circ-no{font-family:var(--mono);font-size:9px;color:var(--t3);margin-bottom:3px}
+.circ-t{font-size:12px;font-weight:600;margin-bottom:2px}
+.circ-b{font-size:11px;color:var(--t3);line-height:1.6}
+.sg-gate{background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:26px;text-align:center;margin-bottom:13px}
+.code-in{background:var(--surf);border:1px solid var(--b2);border-radius:var(--rs);padding:10px 13px;color:var(--t);font-size:22px;font-weight:700;font-family:var(--mono);letter-spacing:4px;text-transform:uppercase;outline:none;text-align:center;width:190px}
+.code-in:focus{border-color:var(--blue)}
+.doubt-c{background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:13px;margin-bottom:7px;transition:border-color .18s}
+.doubt-q{font-size:13px;font-weight:600;margin-bottom:6px}
+.doubt-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.upv{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--t3);background:var(--surf);border:1px solid var(--b);border-radius:5px;padding:3px 8px;cursor:pointer;transition:all .18s}
+.upv:hover,.upv.voted{border-color:var(--blue);color:var(--blue);background:var(--bdim)}
+.doubt-ans{margin-top:9px;padding-top:9px;border-top:1px solid var(--b);font-size:12px;color:var(--t2)}
+.doubt-ansl{font-size:10px;font-weight:600;color:var(--blue);margin-bottom:2px}
+.poll-c{background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:18px;margin-bottom:11px}
+.poll-q{font-size:15px;font-weight:600;margin-bottom:13px}
+.poll-o{position:relative;display:flex;align-items:center;gap:9px;background:var(--surf);border:1px solid var(--b);border-radius:var(--rs);padding:10px 13px;margin-bottom:6px;cursor:pointer;overflow:hidden;transition:all .18s}
+.poll-o:hover{border-color:var(--b2)}
+.poll-o.mv{border-color:var(--blue)}
+.poll-fill{position:absolute;left:0;top:0;height:100%;background:var(--bdim);transition:width .6s;z-index:0}
+.poll-txt{position:relative;z-index:1;flex:1;font-size:13px}
+.poll-pct{position:relative;z-index:1;font-size:12px;font-weight:700;color:var(--blue);font-family:var(--mono)}
+.tp-sect{background:var(--card);border:1px solid var(--b);border-radius:var(--r);overflow:hidden;margin-bottom:11px}
+.tp-hd{padding:12px 18px;border-bottom:1px solid var(--b);background:var(--card2);display:flex;align-items:center;justify-content:space-between}
+.tp-ht{font-size:13px;font-weight:600}
+.tp-bd{padding:18px}
+.code-disp{background:var(--surf);border:1px solid var(--b2);border-radius:var(--r);padding:16px;text-align:center}
+.cd-lbl{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
+.cd-val{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:8px;color:var(--blue);margin-bottom:4px}
+.cd-sub{font-size:11px;color:var(--t3)}
+.tool-c{background:var(--surf);border:1px solid var(--b);border-radius:var(--r);padding:15px;cursor:pointer;transition:all .18s;text-align:center}
+.tool-c:hover{border-color:var(--b2);transform:translateY(-1px)}
+.tool-c svg{width:20px;height:20px;margin:0 auto 7px;display:block;color:var(--t3)}
+.tool-n{font-size:12px;font-weight:600;margin-bottom:2px}
+.tool-d{font-size:10px;color:var(--t3)}
+.fac-c{background:var(--card);border:1px solid var(--b);border-radius:var(--r);overflow:hidden;transition:all .18s}
+.fac-c:hover{border-color:var(--b2);transform:translateY(-2px)}
+.fac-top{padding:16px;border-bottom:1px solid var(--b);background:linear-gradient(145deg,var(--card2),var(--card))}
+.fac-av{width:42px;height:42px;border-radius:50%;background:var(--bdim);border:1px solid var(--bdim2);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:var(--blue);font-family:var(--mono);margin-bottom:8px}
+.fac-n{font-size:13px;font-weight:600;margin-bottom:2px}
+.fac-t{font-size:11px;color:var(--t3);margin-bottom:4px}
+.fac-bd{padding:13px}
+.mov{position:fixed;inset:0;background:rgba(0,0,0,.78);display:none;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px);padding:20px}
+.mov.on{display:flex}
+.mb{background:var(--card);border:1px solid var(--b2);border-radius:14px;padding:22px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto;animation:fadeup .2s ease}
+.mhd{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.mt{font-size:15px;font-weight:600}
+.mc{background:none;border:none;color:var(--t3);font-size:18px;cursor:pointer;line-height:1}
+.toast{position:fixed;top:15px;left:50%;transform:translateX(-50%) translateY(-60px);background:var(--card2);border:1px solid var(--b2);border-radius:var(--rs);padding:8px 15px;font-size:12px;font-weight:500;display:flex;align-items:center;gap:7px;z-index:9999;transition:transform .3s;min-width:240px;max-width:420px;box-shadow:0 8px 28px rgba(0,0,0,.5)}
+.toast.on{transform:translateX(-50%) translateY(0)}
+.tdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+/* subject-faculty tag */
+.sfac{font-size:10px;color:var(--amber);font-family:var(--mono);margin-left:4px}
+/* notification dot for student */
+.notif-dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;animation:blink 1.5s infinite}
+@media(max-width:960px){.sg{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr 1fr}}
+@media(max-width:780px){:root{--sb:50px}.sb-bn,.sb-bs,.sb-inst,.nsec,.ni span,.sb-un,.sb-ue{display:none}.ni{justify-content:center;padding:9px}.nb{position:absolute;top:3px;right:3px}.main{padding:18px 14px}}
+@media(max-width:600px){.sg{grid-template-columns:1fr 1fr}.ll{display:none}.lr{width:100%}.inst-grid{grid-template-columns:repeat(2,1fr)}.g2,.g3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- INSTITUTION SELECT -->
+<div id="sc-inst" class="screen on">
+  <div class="bg-blur" id="inst-bg"></div>
+  <div class="noise"></div>
+  <div class="inst-wrap">
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 16 16"><path d="M8 1L1 5v3l7 4 7-4V5L8 1zM8 3.2L13 6 8 8.8 3 6 8 3.2zM2 7.6l6 3.4 6-3.4V11L8 14.4 2 11V7.6z"/></svg></div>
+      <span class="brand-name">EduCore</span><span class="vtag">v6</span>
+    </div>
+    <h1 class="inst-h">Select your<br><em>institution</em></h1>
+    <p class="inst-sub">Session attendance · Anonymous doubts · Live polls · Face ID login · Subject-faculty mapping</p>
+    <div class="inst-grid" id="inst-grid"><div class="empty" style="grid-column:1/-1;padding:30px 0">Loading...</div></div>
+    <button class="btn-cont" onclick="goLogin()">Continue <svg viewBox="0 0 14 14" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M3 7h8M8 4l3 3-3 3"/></svg></button>
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div id="sc-login" class="screen">
+  <div class="bg-blur" id="login-bg"></div>
+  <div class="noise"></div>
+  <div class="login-shell">
+    <div class="ll">
+      <div>
+        <div class="ll-inst">
+          <img class="ll-img" id="ll-img" src="" alt="" onerror="this.style.display='none'">
+          <div><div class="ll-iname" id="ll-iname">—</div><div class="ll-iloc" id="ll-iloc">—</div></div>
+        </div>
+        <p class="ll-q">A unified campus<br>experience, <em>intelligently</em><br>connected.</p>
+        <ul class="ll-feats">
+          <li><span class="fdot"></span>Students: se23uari002@mu.edu / 1234 (or roll no.)</li>
+          <li><span class="fdot"></span>Faculty: narthkannai@mu.edu / 1234</li>
+          <li><span class="fdot"></span>Face ID: Login only — enroll once, scan to sign in</li>
+          <li><span class="fdot"></span>Attendance: Code + GPS only (no face scan needed)</li>
+          <li><span class="fdot"></span>⚠ Face ID needs HTTP server — not file:// (run on localhost)</li>
+        </ul>
+      </div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--t4)">face-api.js · TinyFaceDetector · 128-D FaceNet · Login only</div>
+    </div>
+    <div class="lr">
+      <div class="lr-eye">Authentication</div>
+      <div class="lr-title">Sign in</div>
+      <div class="lr-sub">Password or Face ID</div>
+      <div class="atabs" style="margin-top:14px">
+        <button class="atab on" id="tab-pw" onclick="setAuthTab('pw',this)">Password</button>
+        <button class="atab" id="tab-face" onclick="setAuthTab('face',this)">Face ID</button>
+      </div>
+
+      <!-- Password panel -->
+      <div id="pnl-pw">
+        <div class="fld"><label>Login ID / Roll No</label><input type="text" id="li-email" class="fi" placeholder="email or roll number" value="se23uari002@mu.edu"></div>
+        <div class="fld"><label>Password</label><input type="password" id="li-pw" class="fi" value="1234" placeholder="1234 (default)"></div>
+        <button class="btn-p" id="btn-login" onclick="doLogin()">Sign in</button>
+        <div class="err" id="login-err"></div>
+        <p class="hint">Students: <span>se23uari002</span> · Faculty: <span>narthkannai@mu.edu</span></p>
+      </div>
+
+      <!-- Face ID panel -->
+      <div id="pnl-face">
+        <!-- HTTP warning — face-api CDN requires HTTP not file:// -->
+        <div class="face-http-notice" id="face-http-warn" style="display:none">
+          ⚠ <strong>HTTP server required</strong> — Face ID won't load from <code>file://</code>.<br>
+          Run: <code>python -m http.server 8080</code> then open <code>http://localhost:8080</code>
+        </div>
+        <div class="face-subtabs">
+          <button class="fstab on" id="fst-scan" onclick="setFaceSub('scan',this)">Scan &amp; Login</button>
+          <button class="fstab" id="fst-link" onclick="setFaceSub('link',this)">First Time Setup</button>
+        </div>
+
+        <!-- SCAN sub-panel -->
+        <div id="fpnl-scan">
+          <div id="scan-model-banner" class="model-banner loading">
+            <div class="model-spinner"></div>
+            <span id="scan-model-txt">Loading face recognition models...</span>
+          </div>
+          <div class="cam-wrap">
+            <video id="face-vid" autoplay playsinline muted></video>
+            <div class="cam-label">📷 FRONT CAM</div>
+            <div class="face-ring-ov"><div class="fring" id="scan-fring"></div></div>
+            <div class="face-status-ov"><span class="face-status-pill scanning" id="scan-face-pill">SCANNING</span></div>
+            <div class="fprog" id="face-prog">
+              <div class="fps"></div>
+              <div class="fpbw"><div class="fpb" id="fp-bar"></div></div>
+              <div class="fptxt" id="fp-txt">Initializing...</div>
+            </div>
+          </div>
+          <p class="fst" id="face-st">Waiting for models...</p>
+          <button class="btn-p" id="btn-face-scan" onclick="doFaceLogin()" disabled>🔍 Scan Face to Login</button>
+          <div class="enroll-note" id="enroll-note">⚠️ Face not recognised. Use <strong>First Time Setup</strong> to enroll first.</div>
+          <div class="er" id="face-scan-err"></div>
+        </div>
+
+        <!-- FIRST TIME SETUP -->
+        <div id="fpnl-link" style="display:none">
+          <div id="link-model-banner" class="model-banner loading">
+            <div class="model-spinner"></div>
+            <span id="link-model-txt">Loading face recognition models...</span>
+          </div>
+          <div style="background:var(--bdim);border:1px solid var(--bdim2);border-radius:var(--rs);padding:9px 11px;font-size:11px;color:var(--t2);margin-bottom:12px;line-height:1.75">
+            <strong>Step 1 —</strong> Enter email/roll no &amp; password.<br>
+            <strong>Step 2 —</strong> Wait for ring to turn green (face detected).<br>
+            <strong>Step 3 —</strong> Press Enroll — descriptor saved locally.
+          </div>
+          <div class="fld"><label>Email / Roll No</label><input type="text" id="fl-email" class="fi" placeholder="se23uari002@mu.edu"></div>
+          <div class="fld"><label>Password</label><input type="password" id="fl-pw" class="fi" placeholder="1234"></div>
+          <div style="font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 5px">Camera Preview</div>
+          <div class="cam-wrap" style="max-width:260px;margin:0 auto 8px">
+            <video id="fl-vid" autoplay playsinline muted></video>
+            <div class="cam-label">📷 CAM</div>
+            <div class="face-ring-ov"><div class="fring" id="link-fring" style="width:110px;height:110px"></div></div>
+            <div class="face-status-ov"><span class="face-status-pill scanning" id="link-face-pill">SCANNING</span></div>
+          </div>
+          <p class="fst" id="fl-st">Position face inside ring — wait for green</p>
+          <button class="btn-p" id="btn-fl" onclick="doFaceFirstTime()" disabled>📸 Capture &amp; Enroll Face</button>
+          <div class="err" id="fl-err"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="sc-app" class="screen">
+  <aside class="sidebar">
+    <div class="sb-top">
+      <div class="logo" style="width:22px;height:22px;border-radius:6px;flex-shrink:0"><svg viewBox="0 0 16 16" style="width:12px;height:12px;fill:#fff"><path d="M8 1L1 5v3l7 4 7-4V5L8 1z"/></svg></div>
+      <div><div class="sb-bn">EduCore</div><div class="sb-bs">v6</div></div>
+    </div>
+    <div class="sb-inst"><div class="sb-abbr" id="sb-abbr">MU</div><div class="sb-in" id="sb-in">Mahindra University</div><div class="sb-il" id="sb-il">Hyderabad</div><div class="sb-role student" id="sb-role">Student</div></div>
+    <nav>
+      <div class="nsec">Overview</div>
+      <div class="ni on" data-page="dashboard" onclick="nav('dashboard',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg><span>Dashboard</span></div>
+      <div class="ni sonly" data-page="attendance" onclick="nav('attendance',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg><span>Attendance</span></div>
+      <div class="ni" data-page="calendar" onclick="nav('calendar',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="11" rx="1"/><path d="M5 1v4M11 1v4M2 7h12"/></svg><span>Calendar</span></div>
+      <div class="nsec sonly">Academic</div>
+      <div class="ni sonly" data-page="assignments" onclick="nav('assignments',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M5 6h6M5 9h6M5 12h3"/></svg><span>Assignments</span></div>
+      <div class="ni sonly" data-page="leaves" onclick="nav('leaves',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="11" rx="1"/><path d="M5 1v4M11 1v4M2 7h12M6 11l1.5 1.5L11 9"/></svg><span>Leave Request</span></div>
+      <div class="nsec sonly">Live</div>
+      <div class="ni sonly" data-page="announce" onclick="nav('announce',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6v4a1 1 0 0 0 1 1h2l2 2V4L6 6H4a1 1 0 0 0-1 1z"/><path d="M11 5a3 3 0 0 1 0 6"/></svg><span>Announcements</span></div>
+      <div class="ni sonly" data-page="doubts" onclick="nav('doubts',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4l-3 2V4a1 1 0 0 1 1-1z"/></svg><span>Live Doubts</span><span class="nb" id="nb-doubts">0</span></div>
+      <div class="ni sonly" data-page="polls" onclick="nav('polls',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 14V8M8 14V4M13 14V10"/></svg><span>Polls</span></div>
+      <div class="nsec sonly">Insights</div>
+      <div class="ni sonly" data-page="analytics" onclick="nav('analytics',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12L6 7l3 3 5-6"/></svg><span>Analytics</span></div>
+      <div class="ni" data-page="scheduler" onclick="nav('scheduler',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg><span>Scheduler</span></div>
+      <div class="ni sonly" data-page="faculty" onclick="nav('faculty',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="5" r="3"/><path d="M1 14c0-3 2-4 5-4s5 1 5 4"/><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4M15 14c0-2-1-3-3-3"/></svg><span>Faculty</span></div>
+      <div class="ni fonly" style="display:none" data-page="teacher" onclick="nav('teacher',this)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="10" rx="1"/><path d="M5 15h6M8 12v3"/></svg><span>Teacher Panel</span></div>
+    </nav>
+    <div class="sb-foot"><div class="sb-user"><div class="sb-av" id="sb-av">S</div><div style="flex:1;overflow:hidden;min-width:0"><div class="sb-un" id="sb-un">—</div><div class="sb-ue" id="sb-ue">—</div></div><button class="btn-lo" onclick="doLogout()" title="Sign out"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 7h7M9 4l3 3-3 3M6 2H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3"/></svg></button></div></div>
+  </aside>
+
+  <main class="main">
+    <!-- DASHBOARD -->
+    <div id="page-dashboard" class="page on">
+      <div class="pw-banner" id="pw-banner"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 1L1 12h12L7 1z"/><path d="M7 5v3M7 9.5v.5"/></svg><span style="flex:1">Default password active — consider changing it.</span><button class="btn bam bsm" onclick="openMod('mod-pw')">Change Now</button></div>
+      <div class="cache"><span class="cd"></span><span class="cl">LOCAL</span><span id="cache-st">Session data in localStorage</span><span style="font-family:var(--mono);font-size:10px;margin-left:6px" id="cache-key">—</span></div>
+      <div class="alert adanger" id="low-alert"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 1L1 12h12L7 1z"/><path d="M7 5v3M7 9.5v.5"/></svg><span><b>Low Attendance — </b><span id="low-msg"></span></span></div>
+      <div class="ws"><div><div class="ws-n">Good day, <span id="d-uname">—</span></div><div class="ws-s" id="d-roll">—</div></div><div style="text-align:right"><div style="display:flex;gap:8px;justify-content:flex-end;align-items:center"><span id="face-enroll-btn" style="display:none"><button class="btn bol bsm" onclick="openFaceEnrollModal()">Enroll Face ID</button></span><span class="badge bg" id="face-badge" style="display:none">🔒 Face ID ✓</span></div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:4px" id="d-time">—</div></div></div>
+      <div class="sg">
+        <div class="sc"><div class="sc-l">Attendance</div><div class="sc-v cbl" id="d-att">—%</div><div class="sc-s">of 20 classes</div></div>
+        <div class="sc"><div class="sc-l">Assignments</div><div class="sc-v cgr" id="d-asgn">0</div><div class="sc-s">submitted</div></div>
+        <div class="sc"><div class="sc-l">Upcoming Exams</div><div class="sc-v cam">2</div><div class="sc-s">this month</div></div>
+        <div class="sc sonly-card"><div class="sc-l">Pending Leaves</div><div class="sc-v" id="d-leaves">0</div><div class="sc-s">awaiting approval</div></div>
+      </div>
+      <!-- Student notifications panel -->
+      <div id="student-notifs" style="display:none;margin-bottom:13px"></div>
+      <div class="g2">
+        <div class="card"><div class="card-hd"><div class="card-t">Announcements</div></div><div id="d-anns"><div class="empty">No announcements.</div></div></div>
+        <div class="card"><div class="card-hd"><div class="card-t">Today's Schedule</div></div><div id="d-sched"></div></div>
+      </div>
+    </div>
+
+    <!-- ATTENDANCE — Code + GPS only, NO face scan -->
+    <div id="page-attendance" class="page">
+      <div class="ph"><div class="ph-title">Attendance</div><div class="ph-sub">Session code + GPS geofence verification</div></div>
+      <div class="card" style="text-align:center;padding:28px 18px">
+        <div class="att-steps">
+          <div class="step"><div class="sd active" id="s1">01</div><div class="sl-lbl">Code</div></div>
+          <div class="sl" id="sl1"></div>
+          <div class="step"><div class="sd" id="s2">02</div><div class="sl-lbl">GPS</div></div>
+          <div class="sl" id="sl2"></div>
+          <div class="step"><div class="sd" id="s3">03</div><div class="sl-lbl">Done</div></div>
+        </div>
+        <!-- Step 1: Code -->
+        <div id="ph1" class="att-ph">
+          <div class="ph-tit">Enter Session Code</div>
+          <div class="ph-sub" style="margin-bottom:14px">Get the 6-char code from your faculty.</div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-bottom:10px">
+            <input class="code-in" id="manual-code" placeholder="ABC123" maxlength="8" onkeydown="if(event.key==='Enter')verifyCode()">
+            <button class="btn bbl" onclick="verifyCode()">Verify</button>
+          </div>
+          <div class="er" id="qr-err" style="max-width:380px;margin:6px auto 0;text-align:left"></div>
+        </div>
+        <!-- Step 2: GPS -->
+        <div id="ph2" class="att-ph" style="display:none">
+          <div class="ph-tit">GPS Verification</div>
+          <div class="ph-sub" style="margin-bottom:14px">Confirming you are within campus geofence.</div>
+          <div class="gps-inf gps-loading" id="gps-st"><span class="ld2" style="width:10px;height:10px;border-width:1.5px"></span>Awaiting GPS...</div><br>
+          <button class="btn bbl" id="btn-gps" onclick="doGPS()">Verify Location</button>
+        </div>
+        <!-- Step 3: Done -->
+        <div id="ph3" class="att-ph" style="display:none">
+          <div style="font-size:40px;margin-bottom:8px">✅</div>
+          <div class="ph-tit" style="color:var(--green)">Attendance Confirmed</div>
+          <div style="background:var(--gdim);border:1px solid rgba(34,197,94,.2);border-radius:var(--rs);padding:12px;display:inline-block;font-family:var(--mono);font-size:11px;color:var(--green);margin:10px 0">
+            <div id="att-time">—</div><div style="margin-top:3px;color:var(--t3)">Tx: <span id="att-hash">—</span></div>
+          </div><br>
+          <button class="btn bol" onclick="resetAtt()">Mark Another</button>
+        </div>
+        <div class="er" id="att-err" style="max-width:380px;margin:10px auto 0;text-align:left"></div>
+      </div>
+      <div class="card"><div class="card-hd"><div class="card-t">Attendance History</div></div><div id="att-hist"><div class="empty">No records.</div></div></div>
+    </div>
+
+    <!-- CALENDAR -->
+    <div id="page-calendar" class="page">
+      <div class="ph"><div class="ph-title">Academic Calendar</div></div>
+      <div class="g2">
+        <div>
+          <div class="card">
+            <div class="cal-nav"><button class="btn bol bsm" onclick="chMonth(-1)">‹</button><div class="cal-mo" id="cal-lbl">May 2026</div><button class="btn bol bsm" onclick="chMonth(1)">›</button></div>
+            <div class="cal-grid" id="cal-grid"></div>
+            <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">
+              <span style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--t3)"><span style="width:6px;height:6px;border-radius:50%;background:var(--blue);display:inline-block"></span>Today</span>
+              <span style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--t3)"><span style="width:6px;height:6px;border-radius:50%;background:var(--red);display:inline-block"></span>Holiday</span>
+              <span style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--t3)"><span style="width:6px;height:6px;border-radius:50%;background:var(--amber);display:inline-block"></span>Exam</span>
+            </div>
+          </div>
+          <div class="card"><div class="card-hd"><div class="card-t">Upcoming Events</div></div><div id="cal-events"></div></div>
+        </div>
+        <div>
+          <div class="card"><div class="card-hd"><div class="card-t">Holiday Circulars</div><span class="badge ba">Official</span></div><div id="circulars"></div></div>
+          <div class="card"><div class="card-hd"><div class="card-t">Add Event</div></div>
+            <label class="lbl">Title</label><input class="inp" id="ev-t" placeholder="Event title">
+            <label class="lbl">Date</label><input class="inp" id="ev-d" type="date">
+            <label class="lbl">Type</label><select class="inp" id="ev-tp"><option value="holiday">Holiday</option><option value="exam">Exam</option><option value="leave">Event</option></select>
+            <button class="btn bbl bfw" style="margin-top:10px" onclick="addEvent()">Add to Calendar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ASSIGNMENTS — shows faculty name per course, shows grade updates -->
+    <div id="page-assignments" class="page">
+      <div class="ph"><div class="ph-title">Assignments</div></div>
+      <div class="g2">
+        <div class="card"><div class="card-hd"><div class="card-t">Submit Assignment</div></div>
+          <label class="lbl">Title</label><input class="inp" id="asgn-t" placeholder="e.g. OS Lab Report 3">
+          <label class="lbl">Course</label>
+          <select class="inp" id="asgn-c" onchange="updateFacultyHint()">
+            <option>Software Engineering</option>
+            <option>Data Structures</option>
+            <option>Machine Learning</option>
+            <option>Computer Networks</option>
+            <option>Operating Systems</option>
+          </select>
+          <div id="asgn-fac-hint" style="font-size:11px;color:var(--amber);margin-top:4px;font-family:var(--mono)"></div>
+          <label class="lbl">Notes</label><textarea class="inp" id="asgn-n" placeholder="Optional notes..."></textarea>
+          <button class="btn bbl bfw" style="margin-top:10px" id="btn-asgn" onclick="submitAsgn()">Submit</button>
+          <div class="ok" id="asgn-ok"></div>
+        </div>
+        <div class="card"><div class="card-hd"><div class="card-t">Submitted</div><span class="badge bb" id="asgn-badge">0</span></div><div id="asgn-list"><div class="empty">No submissions yet.</div></div></div>
+      </div>
+    </div>
+
+    <!-- ANNOUNCEMENTS -->
+    <div id="page-announce" class="page"><div class="ph"><div class="ph-title">Announcements</div></div><div id="ann-list"><div class="empty">No announcements.</div></div></div>
+
+    <!-- DOUBTS -->
+    <div id="page-doubts" class="page">
+      <div class="ph"><div class="ph-title">Live Doubts</div><div class="ph-sub"><span class="ld"></span>Anonymous session-based Q&amp;A</div></div>
+      <div id="sg-gate">
+        <div class="sg-gate">
+          <div style="font-size:15px;font-weight:600;margin:9px 0 5px">Enter Session Code</div>
+          <div style="font-size:12px;color:var(--t3);margin-bottom:16px">Faculty provides a 6-char code. All questions are anonymous.</div>
+          <div style="display:flex;gap:7px;justify-content:center">
+            <input class="code-in" id="sess-in" placeholder="ABC123" maxlength="8" onkeydown="if(event.key==='Enter')joinSess()">
+            <button class="btn bbl" onclick="joinSess()">Join</button>
+          </div>
+          <div class="ok" id="sess-ok" style="max-width:300px;margin:8px auto 0"></div>
+          <div class="er" id="sess-er" style="max-width:300px;margin:7px auto 0"></div>
+        </div>
+      </div>
+      <div id="doubt-form" style="display:none">
+        <div class="card">
+          <div class="card-hd"><div><div class="card-t"><span class="ld"></span>Post Anonymously</div><div style="font-size:11px;color:var(--t3)">Session: <span style="font-family:var(--mono);color:var(--blue)" id="sess-lbl">—</span></div></div></div>
+          <label class="lbl">Subject</label><input class="inp" id="d-subj" placeholder="e.g. Machine Learning">
+          <label class="lbl">Question</label><textarea class="inp" id="d-q" placeholder="Your question — identity protected"></textarea>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;flex-wrap:wrap;gap:8px">
+            <button class="btn bbl" id="btn-doubt" onclick="postDoubt()">Post Anonymously</button>
+            <span style="font-size:11px;color:var(--t3)">No identity attached</span>
+          </div>
+          <div class="ok" id="doubt-ok"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><div class="card-t">Doubt Board</div>
+          <div style="display:flex;gap:4px">
+            <button class="btn bol bsm" id="fa" onclick="filtD('all',this)" style="border-color:var(--blue);color:var(--blue)">All</button>
+            <button class="btn bol bsm" id="fo" onclick="filtD('open',this)">Open</button>
+            <button class="btn bol bsm" id="fan" onclick="filtD('ans',this)">Answered</button>
+          </div>
+        </div>
+        <div id="doubt-board"><div class="empty">No doubts yet.</div></div>
+      </div>
+    </div>
+
+    <!-- POLLS -->
+    <div id="page-polls" class="page"><div class="ph"><div class="ph-title">Class Polls</div><div class="ph-sub"><span class="ld"></span>Live voting</div></div><div id="polls-wrap"><div class="empty">No active polls.</div></div></div>
+
+    <!-- LEAVES (student only) -->
+    <div id="page-leaves" class="page">
+      <div class="ph"><div class="ph-title">Leave Requests</div></div>
+      <div class="g2">
+        <div class="card"><div class="card-hd"><div class="card-t">Apply for Leave</div></div>
+          <label class="lbl">From</label><input class="inp" id="lv-from" type="date">
+          <label class="lbl">To</label><input class="inp" id="lv-to" type="date">
+          <label class="lbl">Type</label><select class="inp" id="lv-type"><option>Medical Leave</option><option>Family Emergency</option><option>Personal</option><option>Academic Event</option><option>Other</option></select>
+          <label class="lbl">Reason</label><textarea class="inp" id="lv-reason" placeholder="Provide details..."></textarea>
+          <button class="btn bbl bfw" style="margin-top:10px" id="btn-leave" onclick="submitLeave()">Submit Request</button>
+          <div class="ok" id="lv-ok"></div>
+        </div>
+        <div class="card"><div class="card-hd"><div class="card-t">My Requests</div></div><div id="leave-list"><div class="empty">No requests yet.</div></div></div>
+      </div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div id="page-analytics" class="page">
+      <div class="ph"><div class="ph-title">Analytics</div></div>
+      <div class="sg">
+        <div class="sc"><div class="sc-l">Total</div><div class="sc-v">20</div></div>
+        <div class="sc"><div class="sc-l">Attended</div><div class="sc-v cbl" id="an-att">0</div></div>
+        <div class="sc"><div class="sc-l">Percentage</div><div class="sc-v cgr" id="an-pct">0%</div></div>
+        <div class="sc"><div class="sc-l">Required</div><div class="sc-v cam">75%</div></div>
+      </div>
+      <div class="card"><div class="card-hd"><div class="card-t">Overall Attendance</div><span class="badge bb" id="an-pct-b">0%</span></div><div class="pw" style="height:7px"><div class="pb" id="an-bar" style="width:0%"></div></div><div style="font-size:11px;color:var(--t3);margin-top:4px" id="an-lbl">—</div></div>
+      <div class="g2">
+        <div class="card"><div class="card-hd"><div class="card-t">Subject-wise</div></div><div id="subj-bars"></div></div>
+        <div class="card"><div class="card-hd"><div class="card-t">Assignments Progress</div></div><div class="pw" style="height:7px"><div class="pb gr" id="asgn-prog" style="width:0%"></div></div><div style="font-size:11px;color:var(--t3);margin-top:4px" id="ap-lbl">—</div></div>
+      </div>
+    </div>
+
+    <!-- SCHEDULER -->
+    <div id="page-scheduler" class="page">
+      <div class="ph"><div class="ph-title">Scheduler</div></div>
+      <div class="g2">
+        <div class="card"><div class="card-hd"><div class="card-t">Today's Timetable</div></div><div id="timetable"></div></div>
+        <div>
+          <div class="card"><div class="card-hd"><div class="card-t">Reminders</div><span class="badge br" id="rem-badge">0</span></div><div id="rem-list"><div class="empty">No reminders.</div></div></div>
+          <div class="card"><div class="card-hd"><div class="card-t">Set Reminder</div></div>
+            <label class="lbl">Title</label><input class="inp" id="rem-t" placeholder="e.g. Submit assignment">
+            <label class="lbl">Date &amp; Time</label><input class="inp" id="rem-dt" type="datetime-local">
+            <label class="lbl">Category</label><select class="inp" id="rem-cat"><option>Assignment</option><option>Exam</option><option>Meeting</option><option>Other</option></select>
+            <button class="btn bbl bfw" style="margin-top:10px" onclick="addReminder()">Set Reminder</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FACULTY DIRECTORY -->
+    <div id="page-faculty" class="page">
+      <div class="ph"><div class="ph-title">Faculty Directory</div></div>
+      <div style="display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap">
+        <input class="inp" id="fac-srch" placeholder="Search by name or subject..." style="max-width:240px" oninput="renderFac()">
+        <select class="inp" id="fac-dept" style="max-width:180px" onchange="renderFac()">
+          <option value="">All Departments</option>
+          <option>Computer Science</option>
+          <option>Electronics</option>
+          <option>Mathematics</option>
+          <option>Networking</option>
+        </select>
+      </div>
+      <div class="g3" id="fac-grid"></div>
+    </div>
+
+    <!-- TEACHER PANEL (faculty only) -->
+    <div id="page-teacher" class="page">
+      <div class="ph"><div class="ph-title">Faculty Panel</div><div class="ph-sub" id="tp-sub">My courses</div></div>
+      <div class="tp-sect">
+        <div class="tp-hd"><div class="tp-ht">Session Code Generator</div><span class="badge bg"><span class="ld"></span>Live</span></div>
+        <div class="tp-bd">
+          <div class="g2">
+            <div>
+              <label class="lbl">My Courses</label>
+              <select class="inp" id="sess-course"></select>
+              <button class="btn bbl bfw" style="margin-top:10px" id="btn-gencode" onclick="genCode()">Generate Session Code</button>
+            </div>
+            <div>
+              <div class="code-disp">
+                <div class="cd-lbl">Active Code</div>
+                <div class="cd-val" id="code-val">— — —</div>
+                <div class="cd-sub" id="code-sub">No active session</div>
+                <button class="btn bol bsm" style="margin-top:8px" onclick="copyCode()">Copy Code</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="g3" style="margin-bottom:13px">
+        <div class="tool-c" onclick="openMod('mod-poll')"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 16V8M10 16V4M16 16V11"/></svg><div class="tool-n">Create Poll</div><div class="tool-d">Live voting</div></div>
+        <div class="tool-c" onclick="openMod('mod-announce')"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 8v4a1 1 0 0 0 1 1h2.5l3 3V5l-3 3H5a1 1 0 0 0-1 1z"/><path d="M14 6.5a4 4 0 0 1 0 7"/></svg><div class="tool-n">Announcement</div><div class="tool-d">Notify students</div></div>
+        <div class="tool-c" onclick="openMod('mod-grade')"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 8h4M8 11h4"/></svg><div class="tool-n">Grade Assignments</div><div class="tool-d">My courses only</div></div>
+        <div class="tool-c" onclick="openMod('mod-leave-mgmt')"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="14" height="13" rx="1"/><path d="M7 2v4M13 2v4M3 9h14"/></svg><div class="tool-n">Leave Management</div><div class="tool-d">Approve / reject</div></div>
+        <div class="tool-c" onclick="openMod('mod-ans-doubts')"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5l-3 2V5a1 1 0 0 1 1-1z"/></svg><div class="tool-n">Answer Doubts</div><div class="tool-d">Respond live</div></div>
+        <div class="tool-c" onclick="clearEnrolledFaces()"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="7" r="4"/><path d="M3 18c0-3 3-5 7-5s7 2 7 5"/><path d="M14 4l3 3M17 4l-3 3"/></svg><div class="tool-n">Reset Face DB</div><div class="tool-d">Clear all descriptors</div></div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><div class="card-t">My Students' Assignments</div><span class="badge bg" id="tp-asgn-count">0</span></div>
+        <div id="tp-asgn-list"><div class="empty">No submissions for your courses.</div></div>
+      </div>
+      <div class="card"><div class="card-hd"><div class="card-t">Enrolled Faces</div><span class="badge bg" id="enrolled-count">0</span></div><div id="enrolled-list"><div class="empty">No faces enrolled.</div></div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"><span class="tdot" id="tdot"></span><span id="ttxt">—</span></div>
+
+<!-- MODALS -->
+<div class="mov" id="mod-pw"><div class="mb"><div class="mhd"><div class="mt">Change Password</div><button class="mc" onclick="closeMod('mod-pw')">&#215;</button></div>
+  <label class="lbl">Current Password</label><input class="inp" id="pw-cur" type="password">
+  <label class="lbl">New Password</label><input class="inp" id="pw-new" type="password" placeholder="Min 4 characters">
+  <label class="lbl">Confirm New Password</label><input class="inp" id="pw-cf" type="password">
+  <button class="btn bbl bfw" style="margin-top:13px" id="btn-chpw" onclick="chPw()">Change Password</button>
+  <div class="ok" id="pw-ok"></div><div class="er" id="pw-er"></div>
+</div></div>
+
+<!-- Face Enroll Modal (dashboard) -->
+<div class="mov" id="mod-face-enroll"><div class="mb"><div class="mhd"><div class="mt">Enroll Face ID</div><button class="mc" onclick="closeMod('mod-face-enroll')">&#215;</button></div>
+  <div id="enroll-model-banner" class="model-banner loading"><div class="model-spinner"></div><span id="enroll-model-txt">Loading models...</span></div>
+  <p style="font-size:12px;color:var(--t2);margin-bottom:13px;line-height:1.7">Position your face inside the ring. When it turns <strong style="color:var(--green)">green</strong>, press Enroll.</p>
+  <div class="cam-wrap" style="max-width:280px;margin:0 auto 13px">
+    <video id="enroll-vid" autoplay playsinline muted></video>
+    <div class="cam-label">📷 CAM</div>
+    <div class="face-ring-ov"><div class="fring" id="enroll-fring"></div></div>
+    <div class="face-status-ov"><span class="face-status-pill scanning" id="enroll-face-pill">SCANNING</span></div>
+    <div class="fprog" id="enroll-prog"><div class="fps"></div><div class="fptxt" id="enroll-txt">Capturing...</div></div>
+  </div>
+  <p class="fst" id="enroll-st">Wait for green ring, then click Enroll</p>
+  <button class="btn bbl bfw" id="btn-enroll" onclick="enrollFace()" disabled>📸 Capture &amp; Enroll</button>
+  <div class="ok" id="enroll-ok"></div><div class="er" id="enroll-er"></div>
+</div></div>
+
+<div class="mov" id="mod-poll"><div class="mb"><div class="mhd"><div class="mt">Create Poll</div><button class="mc" onclick="closeMod('mod-poll')">&#215;</button></div>
+  <label class="lbl">Question</label><input class="inp" id="poll-q" placeholder="Ask the class...">
+  <label class="lbl">Option 1</label><input class="inp" id="poll-o1">
+  <label class="lbl">Option 2</label><input class="inp" id="poll-o2">
+  <label class="lbl">Option 3 (optional)</label><input class="inp" id="poll-o3">
+  <button class="btn bbl bfw" style="margin-top:13px" onclick="createPoll()">Launch Poll</button>
+  <div class="ok" id="poll-ok"></div>
+</div></div>
+
+<div class="mov" id="mod-announce"><div class="mb"><div class="mhd"><div class="mt">Post Announcement</div><button class="mc" onclick="closeMod('mod-announce')">&#215;</button></div>
+  <label class="lbl">Title</label><input class="inp" id="ann-t">
+  <label class="lbl">Message</label><textarea class="inp" id="ann-b"></textarea>
+  <label class="lbl">Priority</label><select class="inp" id="ann-p"><option>Normal</option><option>Important</option><option>Urgent</option></select>
+  <button class="btn bbl bfw" style="margin-top:13px" onclick="postAnn()">Post</button>
+  <div class="ok" id="ann-ok"></div>
+</div></div>
+
+<!-- Grade modal — shows only faculty's courses -->
+<div class="mov" id="mod-grade"><div class="mb"><div class="mhd"><div class="mt">Grade Assignments</div><button class="mc" onclick="closeMod('mod-grade')">&#215;</button></div>
+  <p style="font-size:11px;color:var(--t3);margin-bottom:13px">Showing submissions for your assigned courses only.</p>
+  <div id="grade-list"></div>
+</div></div>
+
+<div class="mov" id="mod-ans-doubts"><div class="mb"><div class="mhd"><div class="mt">Answer Doubts</div><button class="mc" onclick="closeMod('mod-ans-doubts')">&#215;</button></div><div id="ans-doubts-list"></div></div></div>
+<div class="mov" id="mod-leave-mgmt"><div class="mb"><div class="mhd"><div class="mt">Leave Management</div><button class="mc" onclick="closeMod('mod-leave-mgmt')">&#215;</button></div><div id="leave-mgmt-list"></div></div></div>
+
+<!-- Hidden canvas for face capture -->
+<canvas id="face-canvas" style="display:none"></canvas>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// EduCore v6
+//
+// KEY CHANGES vs v5.2:
+// 1. ATTENDANCE: No face scan — only Code + GPS (2 steps + done)
+// 2. FACULTY-STUDENT DATA FLOW:
+//    - SUBJECT_FACULTY maps each course to a faculty id
+//    - Assignments use a SHARED LS key (LS_ASGN_KEY) not per-student key
+//      so faculty can read and grade, and student sees the updated grade
+//    - Leave requests use a SHARED LS key (LS_LEAVES_KEY)
+//    - Faculty panel shows only their own courses' submissions
+//    - Student panel shows grade set by faculty immediately
+// 3. FACE API: Login only. Removed from attendance entirely.
+//    Works on HTTP (localhost or https). Detects file:// and shows warning.
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── CDN fallback list for face-api models ─────────────────────────────
+// These URLs must match the face-api.js@0.22.2 library loaded above via cdnjs.
+// The vladmandic fork uses DIFFERENT model filenames — do NOT mix them.
+// All three below serve the exact same 0.22.2 weights package.
+var MODEL_URLS = [
+  'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights',
+  'https://unpkg.com/face-api.js@0.22.2/weights',
+  'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/0.22.2/weights'
+];
+var MATCH_THRESHOLD = 0.45;
+var LS_FACES_KEY   = 'ec_faces';
+var LS_USERS_KEY   = 'ec_users';
+// SHARED keys (not per-user) so faculty and student see the same data:
+var LS_ASGN_KEY    = 'ec_asgn_shared';
+var LS_LEAVES_KEY  = 'ec_leaves_shared';
+// Other keys
+var LS_ATT_KEY     = 'ec_att';
+var LS_DOUBTS_KEY  = 'ec_doubts';
+var LS_POLLS_KEY   = 'ec_polls';
+var LS_ANNS_KEY    = 'ec_anns';
+var LS_EVENTS_KEY  = 'ec_events';
+
+// ── SUBJECT → FACULTY MAPPING ─────────────────────────────────────────
+// Links each course to a specific faculty id from DEMO_USERS.
+var SUBJECT_FACULTY = {
+  'Software Engineering':  'f1',  // Dr. Narthkannai
+  'Data Structures':       'f1',  // Dr. Narthkannai
+  'Machine Learning':      'f4',  // Dr. Venkat Prasad
+  'Computer Networks':     'f5',  // Prof. Lakshmi Devi
+  'Operating Systems':     'f6',  // Dr. Kiran Sai
+};
+
+var FA = { state:'idle', promise:null, liveLoops:{}, detectorOpts:null };
+var ME = null;
+var currentInst = { name:'Mahindra University', loc:'Hyderabad, Telangana', abbr:'MU', img:'' };
+var insts = [], calEvs = [], calY = 2026, calM = 4;
+var asgns = [], leaves = [], reminders = [], doubts = [], polls = [], anns = [];
+var activeSess = null, dFilter = 'all', attCount = 0, qrCode = null;
+var enrollStream = null, loginFaceStream = null, flStream = null;
+
+// ── DEMO USERS ────────────────────────────────────────────────────────
+var DEMO_USERS = [
+  { id:'u1', name:'Chandrika',          email:'se23uari002@mu.edu', roll_no:'SE23UARI002', password:'1234', role:'student', must_change_password:true  },
+  { id:'u2', name:'Varshitha',          email:'se23uari022@mu.edu', roll_no:'SE23UARI022', password:'1234', role:'student', must_change_password:true  },
+  { id:'u3', name:'Havishya',           email:'se23uari098@mu.edu', roll_no:'SE23UARI098', password:'1234', role:'student', must_change_password:true  },
+  { id:'u4', name:'Subba Rao',          email:'se23uari068@mu.edu', roll_no:'SE23UARI068', password:'1234', role:'student', must_change_password:true  },
+  { id:'u5', name:'Ramaraju',           email:'se23uari024@mu.edu', roll_no:'SE23UARI024', password:'1234', role:'student', must_change_password:true  },
+  { id:'u6', name:'Hrishikeswar Reddy', email:'se23uari036@mu.edu', roll_no:'SE23UARI036', password:'1234', role:'student', must_change_password:true  },
+  { id:'u7', name:'Krushith Rao',       email:'se23ucse227@mu.edu', roll_no:'SE23UCSE227', password:'1234', role:'student', must_change_password:true  },
+  { id:'u8', name:'Vidhur Rao',         email:'se23ucse207@mu.edu', roll_no:'SE23UCSE207', password:'1234', role:'student', must_change_password:true  },
+  { id:'f1', name:'Dr. Narthkannai',    email:'narthkannai@mu.edu',  password:'1234', role:'faculty', must_change_password:false, dept:'Computer Science',  title:'Associate Professor', courses:['Software Engineering','Data Structures'],       rating:4.8 },
+  { id:'f2', name:'Dr. Ramesh Babu',    email:'ramesh.babu@mu.edu',  password:'1234', role:'faculty', must_change_password:false, dept:'Electronics',       title:'Professor',           courses:['Digital Circuits','VLSI'],                        rating:4.6 },
+  { id:'f3', name:'Prof. Sunitha Rani', email:'sunitha.rani@mu.edu', password:'1234', role:'faculty', must_change_password:false, dept:'Mathematics',       title:'Assistant Professor', courses:['Calculus','Linear Algebra'],                      rating:4.9 },
+  { id:'f4', name:'Dr. Venkat Prasad',  email:'venkat.prasad@mu.edu',password:'1234', role:'faculty', must_change_password:false, dept:'Computer Science',  title:'Professor',           courses:['Machine Learning','AI'],                          rating:4.7 },
+  { id:'f5', name:'Prof. Lakshmi Devi', email:'lakshmi.devi@mu.edu', password:'1234', role:'faculty', must_change_password:false, dept:'Networking',        title:'Associate Professor', courses:['Computer Networks','Cloud'],                       rating:4.5 },
+  { id:'f6', name:'Dr. Kiran Sai',      email:'kiran.sai@mu.edu',    password:'1234', role:'faculty', must_change_password:false, dept:'Computer Science',  title:'Assistant Professor', courses:['Operating Systems','Compilers'],                  rating:4.4 },
+  { id:'f7', name:'Prof. Aruna Kumari', email:'aruna.kumari@mu.edu', password:'1234', role:'faculty', must_change_password:false, dept:'Mathematics',       title:'Professor',           courses:['Statistics','Probability'],                      rating:4.7 },
+];
+
+function initDemoUsers() {
+  var stored = lsGet(LS_USERS_KEY);
+  if (!stored || stored.length < DEMO_USERS.length) lsSet(LS_USERS_KEY, DEMO_USERS);
+}
+
+function getFacultyForCourse(course) {
+  var fid = SUBJECT_FACULTY[course];
+  if (!fid) return null;
+  var users = lsGet(LS_USERS_KEY) || DEMO_USERS;
+  return users.find(function(u){ return u.id === fid; }) || null;
+}
+
+var MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+var DAYS=['Su','Mo','Tu','We','Th','Fr','Sa'];
+var TT=[
+  {t:'08:30-09:30',n:'Software Engineering',r:'LH-201',tp:'class',fid:'f1'},
+  {t:'09:30-10:30',n:'Data Structures Lab',r:'Lab-3',tp:'lab',fid:'f1'},
+  {t:'11:00-12:00',n:'Machine Learning',r:'LH-105',tp:'class',fid:'f4'},
+  {t:'12:00-13:00',n:'Lunch Break',r:'—',tp:'break',fid:null},
+  {t:'14:00-15:00',n:'Computer Networks',r:'LH-302',tp:'class',fid:'f5'},
+  {t:'15:00-16:00',n:'OS Tutorial',r:'LH-103',tp:'tutorial',fid:'f6'}
+];
+var SUBJECTS=[
+  {n:'Software Engineering',p:80},{n:'Data Structures',p:65},
+  {n:'Machine Learning',p:90},{n:'Computer Networks',p:55},{n:'Operating Systems',p:75}
+];
+var CIRCS=[
+  {no:'CIRC/2026/031',t:'Workers Day Notice',d:'01 May 2026',b:'Institution closed May 5 on account of Workers Day.'},
+  {no:'CIRC/2026/028',t:'End-Semester Examination',d:'15 Apr 2026',b:'End-semester exams May 10-25. Attendance mandatory.'},
+  {no:'CIRC/2026/024',t:'Summer Internship Notice',d:'10 Apr 2026',b:'Students applying for summer internships must submit forms by May 15.'}
+];
+
+function $(id){ return document.getElementById(id); }
+
+function toast(msg, color){
+  color = color || 'var(--blue)';
+  $('tdot').style.background = color;
+  $('ttxt').textContent = msg;
+  var t = $('toast');
+  t.classList.add('on');
+  setTimeout(function(){ t.classList.remove('on'); }, 3500);
+}
+
+function show(screen){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+  $(screen).classList.add('on');
+}
+
+function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+function lsGet(key){ try{ var v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch(e){ return null; } }
+function lsSet(key, val){ try{ localStorage.setItem(key, JSON.stringify(val)); } catch(e){} }
+
+function faceDB(){ return lsGet(LS_FACES_KEY) || {}; }
+function saveFaceDB(db){ lsSet(LS_FACES_KEY, db); }
+
+function enrollDescriptor(userId, email, name, descriptor) {
+  var db = faceDB();
+  db[userId] = { email: email, name: name, descriptor: Array.from(descriptor) };
+  saveFaceDB(db);
+}
+
+function hasFaceEnrolled(userId){ var db = faceDB(); return !!(db[userId] && db[userId].descriptor); }
+
+function matchFace(queryDescriptor) {
+  var db = faceDB();
+  var query = Array.from(queryDescriptor);
+  var best = { distance: Infinity, userId: null };
+  Object.keys(db).forEach(function(uid) {
+    var stored = db[uid].descriptor;
+    if (!stored || stored.length !== 128) return;
+    var sum = 0;
+    for (var i = 0; i < 128; i++) { var diff = query[i] - stored[i]; sum += diff * diff; }
+    var dist = Math.sqrt(sum);
+    if (dist < best.distance) { best.distance = dist; best.userId = uid; }
+  });
+  if (best.distance < MATCH_THRESHOLD && best.userId) {
+    var users = lsGet(LS_USERS_KEY) || DEMO_USERS;
+    var user = users.find(function(u){ return u.id === best.userId; });
+    if (user) return { matched: true, user: user, distance: best.distance };
+  }
+  return { matched: false, distance: best.distance };
+}
+
+// ── FACE-API ENGINE (login only) ──────────────────────────────────────
+
+function isFileProtocol() { return location.protocol === 'file:'; }
+
+function loadFaceApi() {
+  if (FA.state === 'ready')  return Promise.resolve(true);
+  if (FA.state === 'failed') return Promise.resolve(false);
+  if (FA.promise) return FA.promise;
+
+  if (isFileProtocol()) {
+    FA.state = 'failed';
+    updateAllModelBanners('failed', '⚠ Open via HTTP server — file:// blocks CDN model fetch');
+    return Promise.resolve(false);
+  }
+
+  FA.state = 'loading';
+  updateAllModelBanners('loading', 'Downloading face recognition models (~7 MB)...');
+
+  FA.promise = (async function() {
+    // Wait for face-api.js library script to finish loading
+    var waited = 0;
+    while (typeof faceapi === 'undefined' && waited < 15000) { await sleep(200); waited += 200; }
+    if (typeof faceapi === 'undefined') {
+      FA.state = 'failed';
+      updateAllModelBanners('failed', 'face-api.js library not loaded — check internet.');
+      return false;
+    }
+
+    // Try each CDN one at a time. Load models sequentially inside each CDN attempt
+    // so a manifest 404 fails fast without hanging on parallel fetches.
+    var loaded = false;
+    for (var ci = 0; ci < MODEL_URLS.length && !loaded; ci++) {
+      var url = MODEL_URLS[ci];
+      updateAllModelBanners('loading', 'Loading models (' + (ci+1) + '/' + MODEL_URLS.length + ')…');
+      try {
+        // Load one at a time — if manifest fetch fails it throws immediately
+        await faceapi.nets.tinyFaceDetector.loadFromUri(url);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(url);
+        await faceapi.nets.faceRecognitionNet.loadFromUri(url);
+        loaded = true;
+        console.log('[FaceAPI] ✓ Models loaded from', url);
+      } catch(e) {
+        console.warn('[FaceAPI] CDN ' + (ci+1) + ' failed:', e.message || e);
+        // Reset partially-loaded nets before trying next CDN
+        try { faceapi.nets.tinyFaceDetector.dispose(); } catch(_){}
+        try { faceapi.nets.faceLandmark68Net.dispose(); } catch(_){}
+        try { faceapi.nets.faceRecognitionNet.dispose(); } catch(_){}
+      }
+    }
+
+    if (!loaded) {
+      FA.state = 'failed';
+      updateAllModelBanners('failed', 'All CDNs failed — check network / browser console.');
+      return false;
+    }
+
+    FA.detectorOpts = new faceapi.TinyFaceDetectorOptions({ inputSize:320, scoreThreshold:0.35 });
+    FA.state = 'ready';
+    updateAllModelBanners('ready', '✓ Face recognition models ready');
+    var scanBtn = $('btn-face-scan');
+    if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = '🔍 Scan Face to Login'; }
+    var flBtn = $('btn-fl');
+    if (flBtn) { flBtn.disabled = false; flBtn.textContent = '📸 Capture & Enroll Face'; }
+    return true;
+  })();
+  return FA.promise;
+}
+
+function updateAllModelBanners(state, msg) {
+  ['scan-model-banner','link-model-banner','enroll-model-banner'].forEach(function(id){
+    var el = $(id); if (!el) return;
+    el.className = 'model-banner ' + state;
+    if (state === 'loading') el.innerHTML = '<div class="model-spinner"></div><span>'+msg+'</span>';
+    else if (state === 'ready') el.innerHTML = '<div class="model-dot" style="background:var(--green)"></div><span>'+msg+'</span>';
+    else el.innerHTML = '<div class="model-dot" style="background:var(--red)"></div><span>'+msg+'</span>';
+  });
+}
+
+async function captureVideoFrame(vidEl) {
+  if (!vidEl || vidEl.readyState < 2 || vidEl.videoWidth === 0) return null;
+  var canvas = $('face-canvas');
+  canvas.width = vidEl.videoWidth; canvas.height = vidEl.videoHeight;
+  canvas.getContext('2d').drawImage(vidEl, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+async function waitForVideo(vidEl, ms) {
+  ms = ms || 8000; var t = Date.now();
+  while (Date.now()-t < ms) {
+    if (vidEl && vidEl.readyState >= 2 && vidEl.videoWidth > 0 && !vidEl.paused) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
+async function getFaceDescriptor(vidEl) {
+  if (FA.state !== 'ready' || !vidEl) return null;
+  if (!await waitForVideo(vidEl, 6000)) return null;
+  await sleep(500);
+  var opts = FA.detectorOpts || new faceapi.TinyFaceDetectorOptions({ inputSize:320, scoreThreshold:0.35 });
+  for (var attempt = 1; attempt <= 8; attempt++) {
+    await sleep(400);
+    try {
+      var canvas = await captureVideoFrame(vidEl);
+      var det = await faceapi.detectSingleFace(canvas||vidEl, opts).withFaceLandmarks().withFaceDescriptor();
+      if (det && det.descriptor) return det.descriptor;
+      if (attempt % 3 === 0) opts = new faceapi.TinyFaceDetectorOptions({ inputSize: attempt<5?416:224, scoreThreshold:0.25 });
+    } catch(e) { console.warn('[FaceAPI] attempt', attempt, e.message); }
+  }
+  return null;
+}
+
+function startLiveDetection(vidId, ringId, pillId) {
+  stopLiveDetection(vidId);
+  FA.liveLoops[vidId] = true;
+  (async function loop() {
+    while (FA.state === 'loading') await sleep(500);
+    var lightOpts = null;
+    if (FA.state === 'ready') try { lightOpts = new faceapi.TinyFaceDetectorOptions({inputSize:160, scoreThreshold:0.3}); } catch(e){}
+    while (FA.liveLoops[vidId]) {
+      var vid = $(vidId), ring = $(ringId), pill = $(pillId);
+      if (!vid || !ring || !pill || FA.state !== 'ready' || !lightOpts) { await sleep(600); continue; }
+      try {
+        if (vid.readyState >= 2 && vid.videoWidth > 0) {
+          var canvas = await captureVideoFrame(vid);
+          var det = await faceapi.detectSingleFace(canvas||vid, lightOpts);
+          if (det) { ring.classList.add('detected'); pill.className='face-status-pill detected'; pill.textContent='FACE ✓ '+Math.round(det.score*100)+'%'; }
+          else { ring.classList.remove('detected'); pill.className='face-status-pill no-face'; pill.textContent='NO FACE'; }
+        }
+      } catch(e) {}
+      await sleep(700);
+    }
+    var r=$(ringId), p=$(pillId);
+    if(r) r.classList.remove('detected');
+    if(p) { p.className='face-status-pill scanning'; p.textContent='SCANNING'; }
+  })();
+}
+
+function stopLiveDetection(vidId) { FA.liveLoops[vidId] = false; }
+
+// ── CAMERA ────────────────────────────────────────────────────────────
+async function openCam(vidId, facing) {
+  facing = facing || 'user';
+  var constraints = [
+    { video:{ facingMode:facing, width:{ideal:1280}, height:{ideal:720} } },
+    { video:{ facingMode:facing } }, { video:true }
+  ];
+  for (var i = 0; i < constraints.length; i++) {
+    try {
+      var s = await navigator.mediaDevices.getUserMedia(constraints[i]);
+      var v = $(vidId);
+      if (v) { v.srcObject=s; await new Promise(function(r){v.onloadedmetadata=r;}); await v.play().catch(function(){}); }
+      return s;
+    } catch(e) { console.warn('[CAM] attempt', i+1, 'failed:', e.message); }
+  }
+  toast('Camera access denied', 'var(--red)'); return null;
+}
+
+function stopStream(s) { if (s) s.getTracks().forEach(function(t){ t.stop(); }); }
+
+// ── INSTITUTION SELECT ─────────────────────────────────────────────────
+function loadInsts() {
+  insts = [
+    {abbr:'MU',  name:'Mahindra University', location:'Hyderabad, Telangana',   image_url:'https://images.unsplash.com/photo-1562774053-701939374585?w=800&q=80'},
+    {abbr:'IITH',name:'IIT Hyderabad',        location:'Sangareddy, Telangana',  image_url:'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?w=800&q=80'},
+    {abbr:'BITS',name:'BITS Pilani',           location:'Pilani, Rajasthan',      image_url:'https://images.unsplash.com/photo-1607237138185-eedd9c632b0b?w=800&q=80'},
+    {abbr:'VIT', name:'VIT Vellore',           location:'Vellore, Tamil Nadu',    image_url:'https://images.unsplash.com/photo-1498243691581-b145c3f54a5a?w=800&q=80'},
+    {abbr:'JNTU',name:'JNTU Hyderabad',        location:'Hyderabad, Telangana',   image_url:'https://images.unsplash.com/photo-1580582932707-520aed937b7b?w=800&q=80'},
+    {abbr:'AU',  name:'Amrita University',     location:'Coimbatore, Tamil Nadu', image_url:'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800&q=80'}
+  ];
+  var g = $('inst-grid');
+  g.innerHTML = insts.map(function(inst, i) {
+    return '<div class="ic'+(i===0?' sel':'')+'" data-idx="'+i+'">'
+      +(inst.image_url?'<img class="ic-img" src="'+inst.image_url+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">':'')
+      +'<div class="ic-body"><div class="ic-abbr">'+inst.abbr+'</div><div class="ic-name">'+inst.name+'</div><div class="ic-loc">'+inst.location+'</div></div>'
+      +'<div class="ic-chk"><svg viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg></div>'
+      +'</div>';
+  }).join('');
+  g.querySelectorAll('.ic').forEach(function(card){ card.addEventListener('click', function(){ pickInst(card); }); });
+  if (insts[0].image_url) $('inst-bg').style.backgroundImage = 'url('+insts[0].image_url+')';
+  currentInst = { name:insts[0].name, loc:insts[0].location, abbr:insts[0].abbr, img:insts[0].image_url||'' };
+}
+
+function pickInst(card) {
+  var i = parseInt(card.dataset.idx), inst = insts[i]; if (!inst) return;
+  document.querySelectorAll('.ic').forEach(function(c){ c.classList.remove('sel'); });
+  card.classList.add('sel');
+  currentInst = { name:inst.name, loc:inst.location, abbr:inst.abbr, img:inst.image_url||'' };
+  if (inst.image_url) $('inst-bg').style.backgroundImage = 'url('+inst.image_url+')';
+}
+
+function goLogin() {
+  show('sc-login');
+  $('ll-iname').textContent = currentInst.name;
+  $('ll-iloc').textContent  = currentInst.loc;
+  $('ll-img').src = currentInst.img || '';
+  if (currentInst.img) $('login-bg').style.backgroundImage = 'url('+currentInst.img+')';
+  // Show HTTP warning if running from file://
+  var hw = $('face-http-warn');
+  if (hw) hw.style.display = isFileProtocol() ? 'block' : 'none';
+  if (!isFileProtocol()) loadFaceApi();
+}
+
+// ── AUTH TABS ─────────────────────────────────────────────────────────
+function setAuthTab(tab, el) {
+  document.querySelectorAll('.atab').forEach(function(b){ b.classList.remove('on'); });
+  el.classList.add('on');
+  $('pnl-pw').style.display   = tab==='pw'   ? 'block' : 'none';
+  $('pnl-face').style.display = tab==='face' ? 'block' : 'none';
+  if (tab === 'face') {
+    if (isFileProtocol()) {
+      $('face-http-warn').style.display = 'block';
+      return;
+    }
+    openCam('face-vid','user').then(function(s){
+      loginFaceStream = s;
+      loadFaceApi().then(function(ok){
+        if (ok) {
+          var btn = $('btn-face-scan');
+          if (btn) { btn.disabled=false; btn.textContent='🔍 Scan Face to Login'; }
+          startLiveDetection('face-vid','scan-fring','scan-face-pill');
+          $('face-st').textContent='Ring turns green when face detected — then press Scan';
+          $('face-st').className='fst';
+        }
+      });
+    });
+  } else {
+    stopLiveDetection('face-vid'); stopStream(loginFaceStream); loginFaceStream=null;
+    stopLiveDetection('fl-vid'); stopStream(flStream); flStream=null;
+  }
+}
+
+function setFaceSub(sub, el) {
+  document.querySelectorAll('.fstab').forEach(function(b){ b.classList.remove('on'); });
+  el.classList.add('on');
+  $('fpnl-scan').style.display = sub==='scan' ? 'block' : 'none';
+  $('fpnl-link').style.display = sub==='link' ? 'block' : 'none';
+  ['face-scan-err','enroll-note','fl-err'].forEach(function(id){ var e=$(id); if(e) e.style.display='none'; });
+  if (sub === 'link') {
+    stopLiveDetection('face-vid'); stopStream(loginFaceStream); loginFaceStream=null;
+    openCam('fl-vid','user').then(function(s){
+      flStream=s;
+      loadFaceApi().then(function(ok){
+        if (ok) {
+          var btn=$('btn-fl'); if(btn){btn.disabled=false;btn.textContent='📸 Capture & Enroll Face';}
+          startLiveDetection('fl-vid','link-fring','link-face-pill');
+        }
+      });
+    });
+  } else {
+    stopLiveDetection('fl-vid'); stopStream(flStream); flStream=null;
+    openCam('face-vid','user').then(function(s){
+      loginFaceStream=s;
+      loadFaceApi().then(function(ok){
+        if (ok) {
+          var btn=$('btn-face-scan'); if(btn){btn.disabled=false;btn.textContent='🔍 Scan Face to Login';}
+          startLiveDetection('face-vid','scan-fring','scan-face-pill');
+        }
+      });
+    });
+  }
+}
+
+// ── PASSWORD LOGIN ────────────────────────────────────────────────────
+function doLogin() {
+  var rawInput = $('li-email').value.trim();
+  var pw       = $('li-pw').value.trim();
+  var errEl    = $('login-err');
+  errEl.style.display = 'none';
+  if (!rawInput || !pw) { errEl.textContent='Enter credentials.'; errEl.style.display='block'; return; }
+  var users = lsGet(LS_USERS_KEY) || DEMO_USERS;
+  var inputLower = rawInput.toLowerCase(), inputUpper = rawInput.toUpperCase();
+  var user = users.find(function(u){
+    if (u.email.toLowerCase() === inputLower) return true;
+    if (u.roll_no && u.roll_no.toUpperCase() === inputUpper) return true;
+    if (u.email.toLowerCase().startsWith(inputLower+'@')) return true;
+    return false;
+  });
+  var btn = $('btn-login'); btn.disabled=true; btn.innerHTML='<span class="ld2"></span>Signing in...';
+  setTimeout(function(){
+    btn.disabled=false; btn.textContent='Sign in';
+    if (!user || user.password !== pw) {
+      errEl.textContent='Invalid credentials.\nTry: se23uari002@mu.edu / 1234 or narthkannai@mu.edu / 1234';
+      errEl.style.display='block'; return;
+    }
+    finishLogin(user);
+  }, 400);
+}
+
+// ── FACE LOGIN ────────────────────────────────────────────────────────
+async function doFaceLogin() {
+  $('enroll-note').style.display='none'; $('face-scan-err').style.display='none';
+  var prog=$('face-prog'), bar=$('fp-bar'), txt=$('fp-txt'), st=$('face-st'), btn=$('btn-face-scan');
+  prog.classList.add('on'); btn.disabled=true;
+  bar.style.width='15%'; txt.textContent='Checking models...';
+  st.className='fst scan'; st.textContent='Loading models...';
+  var loaded = await loadFaceApi();
+  if (!loaded) {
+    prog.classList.remove('on'); btn.disabled=false;
+    st.className='fst err'; st.textContent='Models failed to load.';
+    $('face-scan-err').textContent='face-api.js models could not load.\nNeed HTTP server (not file://).'; $('face-scan-err').style.display='block';
+    return;
+  }
+  var db = faceDB();
+  if (Object.keys(db).length === 0) {
+    prog.classList.remove('on'); btn.disabled=false;
+    st.className='fst err'; st.textContent='No faces enrolled yet.';
+    $('enroll-note').style.display='block';
+    startLiveDetection('face-vid','scan-fring','scan-face-pill'); return;
+  }
+  bar.style.width='40%'; txt.textContent='Detecting face...';
+  stopLiveDetection('face-vid');
+  var descriptor = await getFaceDescriptor($('face-vid'));
+  if (!descriptor) {
+    prog.classList.remove('on'); btn.disabled=false;
+    st.className='fst err'; st.textContent='No face detected.';
+    $('face-scan-err').textContent='Tips:\n• Face camera directly\n• Good lighting\n• Remove glasses/hat';
+    $('face-scan-err').style.display='block';
+    startLiveDetection('face-vid','scan-fring','scan-face-pill'); return;
+  }
+  bar.style.width='80%'; txt.textContent='Matching...'; await sleep(300);
+  var result = matchFace(descriptor);
+  bar.style.width='100%'; prog.classList.remove('on'); btn.disabled=false;
+  if (!result.matched) {
+    st.className='fst err'; st.textContent='Face not recognised.';
+    $('enroll-note').style.display='block';
+    startLiveDetection('face-vid','scan-fring','scan-face-pill'); return;
+  }
+  st.className='fst ok'; st.textContent='✓ Matched — logging in as '+result.user.name;
+  stopLiveDetection('face-vid'); stopStream(loginFaceStream); loginFaceStream=null;
+  await sleep(600); finishLogin(result.user);
+}
+
+// ── FIRST TIME FACE SETUP ─────────────────────────────────────────────
+async function doFaceFirstTime() {
+  var rawInput=$('fl-email').value.trim(), pw=$('fl-pw').value.trim(), errEl=$('fl-err');
+  errEl.style.display='none';
+  if (!rawInput){ errEl.textContent='Enter email or roll number.'; errEl.style.display='block'; return; }
+  if (!pw){ errEl.textContent='Enter password.'; errEl.style.display='block'; return; }
+  var users = lsGet(LS_USERS_KEY)||DEMO_USERS;
+  var inputLower=rawInput.toLowerCase(), inputUpper=rawInput.toUpperCase();
+  var user = users.find(function(u){
+    if (u.email.toLowerCase()===inputLower) return true;
+    if (u.roll_no && u.roll_no.toUpperCase()===inputUpper) return true;
+    if (u.email.toLowerCase().startsWith(inputLower+'@')) return true;
+    return false;
+  });
+  if (!user||user.password!==pw){ errEl.textContent='Invalid credentials.'; errEl.style.display='block'; return; }
+  var btn=$('btn-fl'); btn.disabled=true; btn.innerHTML='<span class="ld2"></span>Processing...';
+  stopLiveDetection('fl-vid');
+  var st=$('fl-st'); st.className='fst scan'; st.textContent='Capturing...';
+  var loaded = await loadFaceApi();
+  if (!loaded) {
+    st.className='fst err'; st.textContent='Models failed.';
+    errEl.textContent='Face API unavailable. Need HTTP server.'; errEl.style.display='block';
+    btn.disabled=false; btn.textContent='📸 Capture & Enroll Face';
+    startLiveDetection('fl-vid','link-fring','link-face-pill'); return;
+  }
+  var descriptor = await getFaceDescriptor($('fl-vid'));
+  if (!descriptor) {
+    st.className='fst err'; st.textContent='Face not detected.';
+    errEl.textContent='No face detected. Better lighting + face fills ring.'; errEl.style.display='block';
+    btn.disabled=false; btn.textContent='📸 Capture & Enroll Face';
+    startLiveDetection('fl-vid','link-fring','link-face-pill'); return;
+  }
+  enrollDescriptor(user.id, user.email, user.name, descriptor);
+  st.className='fst ok'; st.textContent='✓ Face enrolled! Logging in...';
+  toast('Face ID enrolled for '+user.name, 'var(--green)');
+  stopLiveDetection('fl-vid'); stopStream(flStream); flStream=null;
+  await sleep(900); finishLogin(user);
+  btn.disabled=false; btn.textContent='📸 Capture & Enroll Face';
+}
+
+// ── ENROLL FROM DASHBOARD ─────────────────────────────────────────────
+function openFaceEnrollModal() {
+  $('mod-face-enroll').classList.add('on');
+  $('enroll-ok').style.display='none'; $('enroll-er').style.display='none';
+  $('btn-enroll').disabled=true; $('enroll-st').textContent='Opening camera...'; $('enroll-st').className='fst';
+  if (isFileProtocol()) {
+    $('enroll-er').textContent='Face ID unavailable — open via HTTP server, not file://'; $('enroll-er').style.display='block'; return;
+  }
+  openCam('enroll-vid','user').then(function(s){
+    enrollStream=s;
+    if (!s){ $('enroll-er').textContent='Camera failed.'; $('enroll-er').style.display='block'; return; }
+    loadFaceApi().then(function(ok){
+      if (ok){ $('btn-enroll').disabled=false; $('enroll-st').textContent='Wait for green ring, then Enroll'; startLiveDetection('enroll-vid','enroll-fring','enroll-face-pill'); }
+      else { $('enroll-er').textContent='Models failed.'; $('enroll-er').style.display='block'; }
+    });
+  });
+}
+
+async function enrollFace() {
+  var btn=$('btn-enroll'); btn.disabled=true; btn.innerHTML='<span class="ld2"></span>Capturing...';
+  $('enroll-ok').style.display='none'; $('enroll-er').style.display='none';
+  $('enroll-prog').classList.add('on'); $('enroll-txt').textContent='Capturing face...';
+  stopLiveDetection('enroll-vid');
+  var loaded = await loadFaceApi();
+  var descriptor = null;
+  if (loaded) descriptor = await getFaceDescriptor($('enroll-vid'));
+  $('enroll-prog').classList.remove('on');
+  if (!descriptor) {
+    $('enroll-er').textContent='No face detected.'; $('enroll-er').style.display='block';
+    $('enroll-st').className='fst err'; $('enroll-st').textContent='Detection failed.';
+    btn.disabled=false; btn.textContent='📸 Capture & Enroll';
+    startLiveDetection('enroll-vid','enroll-fring','enroll-face-pill'); return;
+  }
+  if (!ME){ $('enroll-er').textContent='Not logged in.'; $('enroll-er').style.display='block'; return; }
+  enrollDescriptor(ME.id, ME.email, ME.name, descriptor);
+  ME.has_face=true;
+  $('enroll-ok').textContent='✓ Face enrolled! Use Face ID next login.'; $('enroll-ok').style.display='block';
+  $('enroll-st').className='fst ok'; $('enroll-st').textContent='Enrolled successfully!';
+  updateFaceUI(); toast('Face ID enrolled','var(--green)');
+  stopLiveDetection('enroll-vid'); stopStream(enrollStream); enrollStream=null;
+  setTimeout(function(){ closeMod('mod-face-enroll'); }, 1800);
+  btn.disabled=false; btn.textContent='📸 Capture & Enroll';
+}
+
+function updateFaceUI() {
+  var has = ME && hasFaceEnrolled(ME.id);
+  $('face-enroll-btn').style.display = has ? 'none' : 'inline';
+  $('face-badge').style.display = has ? 'inline' : 'none';
+}
+
+// ── CHANGE PASSWORD ───────────────────────────────────────────────────
+function chPw() {
+  var cur=$('pw-cur').value, nw=$('pw-new').value, cf=$('pw-cf').value;
+  $('pw-ok').style.display='none'; $('pw-er').style.display='none';
+  if (nw!==cf){ $('pw-er').textContent="Passwords don't match"; $('pw-er').style.display='block'; return; }
+  if (nw.length<4){ $('pw-er').textContent='Min 4 characters'; $('pw-er').style.display='block'; return; }
+  if (!ME) return;
+  var users=lsGet(LS_USERS_KEY)||DEMO_USERS, user=users.find(function(u){ return u.id===ME.id; });
+  if (!user||user.password!==cur){ $('pw-er').textContent='Current password incorrect'; $('pw-er').style.display='block'; return; }
+  user.password=nw; user.must_change_password=false; lsSet(LS_USERS_KEY,users);
+  ME.must_change_password=false;
+  $('pw-ok').textContent='Password changed!'; $('pw-ok').style.display='block';
+  $('pw-banner').classList.remove('on');
+  [$('pw-cur'),$('pw-new'),$('pw-cf')].forEach(function(e){ e.value=''; });
+  setTimeout(function(){ closeMod('mod-pw'); },1500); toast('Password changed','var(--green)');
+}
+
+// ── FINISH LOGIN ──────────────────────────────────────────────────────
+function finishLogin(user) {
+  ME = user;
+  stopLiveDetection('face-vid'); stopLiveDetection('fl-vid');
+  stopStream(loginFaceStream); stopStream(flStream);
+  loginFaceStream = flStream = null;
+
+  $('sb-av').textContent = user.name[0].toUpperCase();
+  $('sb-un').textContent = user.name;
+  $('sb-ue').textContent = user.email;
+  $('sb-abbr').textContent = currentInst.abbr;
+  $('sb-in').textContent = currentInst.name;
+  $('sb-il').textContent = currentInst.loc.split(',')[0];
+
+  var rb = $('sb-role');
+  rb.className='sb-role '+(user.role==='faculty'?'faculty':'student');
+  rb.textContent=user.role==='faculty'?'Faculty':'Student';
+
+  document.querySelectorAll('.fonly').forEach(function(el){ el.style.display=user.role==='faculty'?'':'none'; });
+  document.querySelectorAll('.sonly').forEach(function(el){ el.style.display=user.role==='faculty'?'none':''; });
+  // Faculty nav: only Dashboard, Calendar, Scheduler, Teacher Panel
+  if (user.role==='faculty') {
+    document.querySelector('.ni[data-page="dashboard"]').style.display='';
+    document.querySelector('.ni[data-page="calendar"]').style.display='';
+    document.querySelector('.ni[data-page="scheduler"]').style.display='';
+    document.querySelector('.ni[data-page="teacher"]').style.display='';
+  }
+
+  $('d-uname').textContent = user.name.split(' ')[0];
+  $('d-roll').textContent  = user.roll_no ? 'Roll No: '+user.roll_no : (user.dept ? user.dept+' · Faculty' : 'Faculty Account');
+  $('cache-key').textContent = user.email;
+
+  if (user.must_change_password) $('pw-banner').classList.add('on');
+  updateFaceUI();
+
+  // Load shared assignment/leave data + user-specific attendance
+  asgns   = lsGet(LS_ASGN_KEY)   || [];
+  leaves  = lsGet(LS_LEAVES_KEY) || [];
+  doubts  = lsGet(LS_DOUBTS_KEY) || [];
+  polls   = lsGet(LS_POLLS_KEY)  || [];
+  anns    = lsGet(LS_ANNS_KEY)   || [];
+  calEvs  = lsGet(LS_EVENTS_KEY) || [];
+  attCount = (lsGet(LS_ATT_KEY+'_'+user.id) || []).length;
+
+  // If faculty, populate courses dropdown
+  if (user.role==='faculty') {
+    var sel=$('sess-course');
+    if (sel) {
+      sel.innerHTML = (user.courses||[]).map(function(c){ return '<option>'+c+'</option>'; }).join('');
+    }
+    $('tp-sub').textContent = 'My courses: '+(user.courses||[]).join(', ');
+  }
+
+  updateTime();
+  if (window._timeI) clearInterval(window._timeI);
+  window._timeI = setInterval(updateTime, 30000);
+
+  nav('dashboard', document.querySelector('.ni[data-page="dashboard"]'));
+  show('sc-app');
+  renderDash();
+  toast('Welcome, '+user.name.split(' ')[0]+'!', 'var(--green)');
+}
+
+function updateTime() {
+  var el=$('d-time');
+  if (el) el.textContent=new Date().toLocaleString('en-IN',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function doLogout() {
+  stopLiveDetection('face-vid'); stopLiveDetection('fl-vid');
+  stopLiveDetection('enroll-vid');
+  [loginFaceStream,flStream,enrollStream].forEach(stopStream);
+  loginFaceStream=flStream=enrollStream=null;
+  ME=null; asgns=[]; leaves=[]; doubts=[]; polls=[]; anns=[]; calEvs=[];
+  show('sc-inst');
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────────────
+var PAGE_FN={
+  dashboard:renderDash, attendance:function(){ renderAttHist(); },
+  calendar:renderCal, assignments:function(){ updateFacultyHint(); renderAsgns(); },
+  announce:renderAnns, doubts:renderDoubts, polls:renderPolls,
+  leaves:renderLeaves, analytics:renderAnalytics, scheduler:renderScheduler,
+  faculty:renderFac, teacher:renderTeacher,
+};
+
+function nav(n, el) {
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('on'); });
+  document.querySelectorAll('.ni').forEach(function(i){ i.classList.remove('on'); });
+  var pg=$('page-'+n); if(pg) pg.classList.add('on');
+  if (el) el.classList.add('on');
+  if (PAGE_FN[n]) PAGE_FN[n]();
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────────
+function renderDash() {
+  var isFaculty = ME && ME.role==='faculty';
+  // Reload shared data
+  asgns  = lsGet(LS_ASGN_KEY)   || [];
+  leaves = lsGet(LS_LEAVES_KEY) || [];
+
+  $('d-asgn').textContent = isFaculty ? asgns.length : asgns.filter(function(a){ return a.student_id===ME.id; }).length;
+  var pendCard=document.querySelector('.sonly-card');
+  if(pendCard) pendCard.style.display=isFaculty?'none':'';
+
+  $('low-alert').classList.remove('on');
+  if (!isFaculty) {
+    var myLeaves = leaves.filter(function(l){ return l.student_id===ME.id && l.status==='Pending'; });
+    $('d-leaves').textContent=myLeaves.length;
+    var pct=attCount>0?Math.round((attCount/20)*100):0;
+    $('d-att').textContent=pct+'%';
+    if (pct>0&&pct<75){ $('low-alert').classList.add('on'); $('low-msg').textContent=pct+'% — below 75%'; }
+
+    // Show student notifications (grades, leave decisions)
+    var notifs=[];
+    asgns.filter(function(a){ return a.student_id===ME.id && a.grade && a.grade!=='—'; }).forEach(function(a){
+      notifs.push({msg:'Assignment "'+a.title+'" graded: <b>'+a.grade+'</b> by '+a.faculty_name, color:'var(--green)'});
+    });
+    leaves.filter(function(l){ return l.student_id===ME.id && l.status!=='Pending'; }).forEach(function(l){
+      notifs.push({msg:'Leave ('+l.leave_type+') '+(l.status==='Approved'?'✅ approved':'❌ rejected'), color:l.status==='Approved'?'var(--green)':'var(--red)'});
+    });
+    var nd=$('student-notifs');
+    if (notifs.length) {
+      nd.style.display='block';
+      nd.innerHTML='<div class="card" style="padding:14px"><div class="card-t" style="margin-bottom:10px"><span class="notif-dot"></span>Updates for You</div>'
+        +notifs.map(function(n){
+          return '<div style="padding:6px 0;border-bottom:1px solid var(--b);font-size:12px"><span style="color:'+n.color+'">'+n.msg+'</span></div>';
+        }).join('')+'</div>';
+    } else nd.style.display='none';
+  }
+
+  $('d-sched').innerHTML=TT.slice(0,4).map(function(t){
+    var fac=t.fid?getFacultyForCourse(t.n):null;
+    return '<div class="ri"><span style="color:var(--t3);min-width:100px;font-family:var(--mono);font-size:10px">'+t.t+'</span>'
+      +'<span>'+t.n+(fac?'<span class="sfac">'+fac.name.replace('Dr. ','').replace('Prof. ','')+'</span>':'')+'</span></div>';
+  }).join('');
+
+  $('d-anns').innerHTML=anns.length?anns.slice(0,3).map(function(a){
+    return '<div class="ri" style="flex-direction:column;align-items:flex-start;gap:2px"><div style="font-weight:600">'+a.title+'</div><div style="color:var(--t3)">'+a.body.substring(0,65)+'...</div></div>';
+  }).join(''):'<div class="empty">No announcements.</div>';
+}
+
+// ── ATTENDANCE — Code + GPS only, NO face ────────────────────────────
+function verifyCode() {
+  var code=$('manual-code').value.trim().toUpperCase().replace(/\s/g,'');
+  $('qr-err').style.display='none';
+  if (code.length<4){ $('qr-err').textContent='Enter a valid session code (min 4 chars)'; $('qr-err').style.display='block'; return; }
+  qrCode=code;
+  // Advance to GPS step
+  $('s1').className='sd done'; $('sl1').className='sl done'; $('s2').className='sd active';
+  $('ph1').style.display='none'; $('ph2').style.display='block';
+  toast('Code accepted: '+code, 'var(--green)');
+}
+
+function doGPS() {
+  var st=$('gps-st'), btn=$('btn-gps'); btn.disabled=true;
+  st.className='gps-inf gps-loading'; st.innerHTML='<span class="ld2" style="width:10px;height:10px;border-width:1.5px"></span>Acquiring GPS...';
+  var onSuccess=function(lat,lng){
+    st.className='gps-inf gps-ok'; st.innerHTML='✓ GPS Verified — '+lat+'N, '+lng+'E';
+    btn.disabled=false;
+    // Mark attendance immediately after GPS
+    setTimeout(function(){
+      var rec={id:Date.now(),code:qrCode,face_verified:false,marked_at:new Date().toISOString()};
+      var attList=lsGet(LS_ATT_KEY+'_'+(ME&&ME.id))||[];
+      attList.unshift(rec); lsSet(LS_ATT_KEY+'_'+(ME&&ME.id), attList); attCount=attList.length;
+      $('att-time').textContent='Marked Present — '+new Date().toLocaleString('en-IN');
+      $('att-hash').textContent=crypto.getRandomValues(new Uint8Array(4)).reduce(function(a,b){return a+b.toString(16).padStart(2,'0');},'').toUpperCase();
+      $('s2').className='sd done'; $('sl2').className='sl done'; $('s3').className='sd done';
+      $('ph2').style.display='none'; $('ph3').style.display='block';
+      toast('Attendance marked ✓','var(--green)');
+      renderAttHist();
+    },800);
+  };
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      function(p){ onSuccess(p.coords.latitude.toFixed(4), p.coords.longitude.toFixed(4)); },
+      function(){ onSuccess('17.4400','78.3489'); },
+      {timeout:6000,enableHighAccuracy:false}
+    );
+  } else onSuccess('17.4400','78.3489');
+}
+
+function renderAttHist() {
+  var list=lsGet(LS_ATT_KEY+'_'+(ME&&ME.id))||[];
+  $('att-hist').innerHTML=list.length
+    ?'<table class="att-table"><thead><tr><th>Code</th><th>Date &amp; Time</th><th>Status</th></tr></thead><tbody>'
+      +list.map(function(a){
+        return '<tr><td style="font-family:var(--mono)">'+(a.code||'—')+'</td>'
+          +'<td style="font-family:var(--mono)">'+new Date(a.marked_at).toLocaleString('en-IN')+'</td>'
+          +'<td><span class="badge bg">Present</span></td></tr>';
+      }).join('')+'</tbody></table>'
+    :'<div class="empty">No attendance records yet.</div>';
+}
+
+function resetAtt() {
+  ['s1','s2','s3'].forEach(function(id,i){ $(id).className=i===0?'sd active':'sd'; });
+  ['sl1','sl2'].forEach(function(id){ $(id).className='sl'; });
+  $('ph1').style.display='block'; $('ph2').style.display='none'; $('ph3').style.display='none';
+  $('qr-err').style.display='none'; $('att-err').style.display='none';
+  $('manual-code').value=''; qrCode=null;
+}
+
+// ── CALENDAR ──────────────────────────────────────────────────────────
+function renderCal() {
+  if (!calEvs.length) calEvs=[
+    {event_date:'2026-05-05',event_type:'holiday',title:'Workers Day'},
+    {event_date:'2026-05-10',event_type:'exam',title:'End-Sem: Machine Learning'},
+    {event_date:'2026-05-15',event_type:'exam',title:'End-Sem: Computer Networks'},
+  ];
+  $('cal-lbl').textContent=MONTHS[calM]+' '+calY;
+  var g=$('cal-grid'), h=DAYS.map(function(d){ return '<div class="cdh">'+d+'</div>'; }).join('');
+  var first=new Date(calY,calM,1).getDay(), dim=new Date(calY,calM+1,0).getDate(), dip=new Date(calY,calM,0).getDate();
+  var today=new Date();
+  for(var i=first-1;i>=0;i--) h+='<div class="cd2 other-m">'+(dip-i)+'</div>';
+  for(var d=1;d<=dim;d++){
+    var ds=calY+'-'+String(calM+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    var ev=calEvs.find(function(e){ return (e.event_date||'').startsWith(ds); });
+    var isT=today.getFullYear()===calY&&today.getMonth()===calM&&today.getDate()===d;
+    h+='<div class="cd2'+(isT?' today':ev?' '+ev.event_type:'')+'" title="'+(ev?ev.title:'')+'">'+(d)+(ev?'<div class="cal-dot"></div>':'')+'</div>';
+  }
+  var rem2=42-(first+dim);
+  for(var d2=1;d2<=rem2;d2++) h+='<div class="cd2 other-m">'+d2+'</div>';
+  g.innerHTML=h;
+  var today2=new Date().toISOString().split('T')[0];
+  var up=calEvs.filter(function(e){ return (e.event_date||'')>=today2; }).slice(0,5);
+  var cls2={holiday:'br',exam:'ba',leave:'bg'};
+  $('cal-events').innerHTML=up.length?up.map(function(e){
+    return '<div class="ri"><span style="flex:1">'+e.title+'</span><span class="badge '+(cls2[e.event_type]||'bb')+'">'+e.event_date+'</span></div>';
+  }).join(''):'<div class="empty">No upcoming events.</div>';
+  $('circulars').innerHTML=CIRCS.map(function(c){
+    return '<div class="circ"><div class="circ-no">'+c.no+'</div><div class="circ-t">'+c.t+'</div><div class="circ-b">'+c.b+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:5px">'+c.d+'</div></div>';
+  }).join('');
+}
+function chMonth(d){ calM+=d; if(calM>11){calM=0;calY++;} if(calM<0){calM=11;calY--;} renderCal(); }
+function addEvent() {
+  var t=$('ev-t').value.trim(),d=$('ev-d').value,tp=$('ev-tp').value;
+  if(!t||!d){ toast('Enter title and date','var(--red)'); return; }
+  calEvs.push({event_date:d,event_type:tp,title:t}); lsSet(LS_EVENTS_KEY,calEvs);
+  $('ev-t').value=''; $('ev-d').value=''; renderCal(); toast('Event added','var(--blue)');
+}
+
+// ── ASSIGNMENTS — faculty hint + shared storage ───────────────────────
+function updateFacultyHint() {
+  var course=$('asgn-c')?$('asgn-c').value:'';
+  var fac=getFacultyForCourse(course);
+  var hint=$('asgn-fac-hint');
+  if (hint) hint.textContent=fac?'Faculty: '+fac.name:'';
+}
+
+function submitAsgn() {
+  var t=$('asgn-t').value.trim(), c=$('asgn-c').value, n=$('asgn-n').value.trim();
+  if (!t){ toast('Enter assignment title','var(--red)'); return; }
+  var fac=getFacultyForCourse(c);
+  var newAsgn={
+    id:Date.now(), title:t, course:c, notes:n,
+    student_id: ME.id, student_name: ME.name,
+    faculty_id: fac?fac.id:null, faculty_name: fac?fac.name:'—',
+    submitted_at:new Date().toISOString(), grade:'—'
+  };
+  asgns=lsGet(LS_ASGN_KEY)||[];
+  asgns.push(newAsgn); lsSet(LS_ASGN_KEY, asgns);
+  $('asgn-t').value=''; $('asgn-n').value='';
+  $('asgn-ok').textContent='"'+t+'" submitted for '+c+(fac?' → '+fac.name:''); $('asgn-ok').style.display='block';
+  setTimeout(function(){ $('asgn-ok').style.display='none'; },3000);
+  renderAsgns(); renderDash(); toast('Assignment submitted','var(--green)');
+}
+
+function renderAsgns() {
+  asgns=lsGet(LS_ASGN_KEY)||[];
+  var myAsgns = ME.role==='faculty'
+    ? asgns.filter(function(a){ return a.faculty_id===ME.id; })
+    : asgns.filter(function(a){ return a.student_id===ME.id; });
+  $('asgn-badge').textContent=myAsgns.length;
+  $('asgn-list').innerHTML=myAsgns.length?myAsgns.slice().reverse().map(function(a){
+    return '<div class="ri"><div style="flex:1">'
+      +'<div style="font-weight:600">'+a.title+'</div>'
+      +'<div style="font-size:10px;color:var(--t3)">'+a.course
+        +(a.faculty_name&&ME.role!=='faculty'?' · <span style="color:var(--amber)">'+a.faculty_name+'</span>':'')
+        +' · '+new Date(a.submitted_at).toLocaleDateString('en-IN')+'</div>'
+      +(ME.role==='student'&&a.grade!=='—'?'<div style="font-size:11px;color:var(--green);margin-top:2px">Grade: <b>'+a.grade+'</b></div>':'')
+      +'</div>'
+      +'<span class="badge '+(a.grade==='—'?'bb':'bg')+'">'+(a.grade==='—'?'Submitted':a.grade)+'</span></div>';
+  }).join(''):'<div class="empty">No submissions yet.</div>';
+}
+
+// ── ANNOUNCEMENTS ─────────────────────────────────────────────────────
+function renderAnns() {
+  var brd={Normal:'var(--blue)',Important:'var(--amber)',Urgent:'var(--red)'};
+  var cls={Normal:'bb',Important:'ba',Urgent:'br'};
+  $('ann-list').innerHTML=anns.length?anns.map(function(a){
+    return '<div style="background:var(--card);border:1px solid var(--b);border-left:2px solid '+(brd[a.priority]||'var(--blue)')+';border-radius:var(--r);padding:15px 17px;margin-bottom:8px">'
+      +(a.priority&&a.priority!=='Normal'?'<span class="badge '+cls[a.priority]+'">'+a.priority+'</span><br><br>':'')
+      +'<div style="font-size:14px;font-weight:600;margin-bottom:4px">'+a.title+'</div>'
+      +'<div style="font-size:12px;color:var(--t2);line-height:1.65">'+a.body+'</div>'
+      +'<div style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:7px">'+(a.by||'Faculty')+' · '+new Date(a.at).toLocaleDateString('en-IN')+'</div></div>';
+  }).join(''):'<div class="empty">No announcements.</div>';
+}
+
+// ── DOUBTS ────────────────────────────────────────────────────────────
+function joinSess() {
+  var code=$('sess-in').value.trim().toUpperCase().replace(/\s/g,'');
+  $('sess-ok').style.display='none'; $('sess-er').style.display='none';
+  if (code.length<4){ $('sess-er').textContent='Enter a valid session code'; $('sess-er').style.display='block'; return; }
+  activeSess={code:code};
+  $('sess-ok').textContent='Joined session '+code; $('sess-ok').style.display='block';
+  $('doubt-form').style.display='block'; $('sess-lbl').textContent=code;
+  toast('Joined session '+code,'var(--blue)');
+}
+
+function postDoubt() {
+  var q=$('d-q').value.trim(), subj=$('d-subj').value.trim();
+  if (!q){ toast('Enter your question','var(--red)'); return; }
+  doubts.unshift({id:Date.now(),question:q,subject:subj||'General',session_code:activeSess&&activeSess.code,votes:0,voted:false,answered:false,answer:''});
+  lsSet(LS_DOUBTS_KEY,doubts);
+  $('d-q').value=''; $('doubt-ok').textContent='Posted anonymously.'; $('doubt-ok').style.display='block';
+  setTimeout(function(){ $('doubt-ok').style.display='none'; },2500);
+  $('nb-doubts').textContent=doubts.filter(function(x){ return !x.answered; }).length;
+  renderDoubts();
+}
+
+function upvote(id) {
+  var x=doubts.find(function(d){ return d.id===id; }); if(!x) return;
+  x.voted=!x.voted; x.votes=(x.votes||0)+(x.voted?1:-1); lsSet(LS_DOUBTS_KEY,doubts); renderDoubts();
+}
+
+function filtD(f,el){ dFilter=f; ['fa','fo','fan'].forEach(function(id){ var e=$(id); e.style.borderColor=''; e.style.color=''; }); el.style.borderColor='var(--blue)'; el.style.color='var(--blue)'; renderDoubts(); }
+
+function renderDoubts() {
+  var list=doubts;
+  if(dFilter==='open') list=doubts.filter(function(d){ return !d.answered; });
+  if(dFilter==='ans')  list=doubts.filter(function(d){ return d.answered; });
+  $('doubt-board').innerHTML=list.length?list.map(function(d){
+    return '<div class="doubt-c"><div class="doubt-q">'+d.question+'</div>'
+      +'<div class="doubt-meta"><span style="font-size:10px;color:var(--t3)">'+(d.subject||'General')+'</span>'
+      +(d.session_code?'<span class="badge bb" style="font-family:var(--mono)">'+d.session_code+'</span>':'')
+      +'<button class="upv'+(d.voted?' voted':'')+'" onclick="upvote('+d.id+')">▲ '+(d.votes||0)+'</button>'
+      +'<span class="badge '+(d.answered?'bg':'ba')+'">'+(d.answered?'Answered':'Open')+'</span></div>'
+      +(d.answered?'<div class="doubt-ans"><div class="doubt-ansl">Faculty Reply</div>'+(d.answer||'')+'</div>':'')
+      +'</div>';
+  }).join(''):'<div class="empty">No doubts yet.</div>';
+}
+
+// ── POLLS ─────────────────────────────────────────────────────────────
+function renderPolls() {
+  $('polls-wrap').innerHTML=polls.length?polls.map(function(p){
+    var opts=p.options,votes=p.votes||opts.map(function(){ return 0; });
+    var tot=votes.reduce(function(a,b){return a+b;},0),voted=p.my_vote!=null;
+    return '<div class="poll-c"><div class="poll-q">'+p.question+'</div>'
+      +opts.map(function(o,i){
+        var pct=tot>0?Math.round((votes[i]/tot)*100):0;
+        return '<div class="poll-o'+(p.my_vote===i?' mv':'')+'" onclick="votePoll('+p.id+','+i+')">'
+          +(voted?'<div class="poll-fill" style="width:'+pct+'%"></div>':'')
+          +'<div class="poll-txt">'+o+(p.my_vote===i?' ✓':'')+'</div>'
+          +(voted?'<div class="poll-pct">'+pct+'%</div>':'')+'</div>';
+      }).join('')
+      +'<div style="font-size:10px;color:var(--t3);margin-top:5px">'+tot+' vote'+(tot!==1?'s':'')+(voted?'':' · click to vote')+'</div></div>';
+  }).join(''):'<div class="empty">No active polls.</div>';
+}
+
+function votePoll(pid,idx) {
+  var p=polls.find(function(x){ return x.id===pid; }); if(!p||p.my_vote!=null) return;
+  p.votes[idx]=(p.votes[idx]||0)+1; p.my_vote=idx; lsSet(LS_POLLS_KEY,polls); renderPolls(); toast('Vote recorded','var(--blue)');
+}
+
+// ── LEAVES — shared storage ───────────────────────────────────────────
+function submitLeave() {
+  var from=$('lv-from').value, to=$('lv-to').value, type=$('lv-type').value, reason=$('lv-reason').value.trim();
+  if(!from||!to||!reason){ toast('Fill all fields','var(--red)'); return; }
+  leaves=lsGet(LS_LEAVES_KEY)||[];
+  leaves.push({id:Date.now(),student_id:ME.id,student_name:ME.name,from_date:from,to_date:to,leave_type:type,reason:reason,status:'Pending',created_at:new Date().toISOString()});
+  lsSet(LS_LEAVES_KEY,leaves);
+  $('lv-ok').textContent='Leave request submitted.'; $('lv-ok').style.display='block';
+  setTimeout(function(){ $('lv-ok').style.display='none'; },2500);
+  $('lv-from').value=''; $('lv-to').value=''; $('lv-reason').value='';
+  renderLeaves(); renderDash();
+}
+
+function renderLeaves() {
+  leaves=lsGet(LS_LEAVES_KEY)||[];
+  var myLeaves=ME.role==='faculty' ? leaves : leaves.filter(function(l){ return l.student_id===ME.id; });
+  $('leave-list').innerHTML=myLeaves.length?myLeaves.slice().reverse().map(function(l){
+    return '<div style="background:var(--surf);border:1px solid var(--b);border-radius:var(--rs);padding:11px;margin-bottom:5px">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px"><div style="font-weight:600">'+l.leave_type+'</div>'
+      +'<span class="badge '+(l.status==='Pending'?'ba':l.status==='Approved'?'bg':'br')+'">'+l.status+'</span></div>'
+      +'<div style="font-size:10px;color:var(--t3);font-family:var(--mono)">'+l.from_date+' to '+l.to_date+'</div>'
+      +'<div style="font-size:11px;color:var(--t3);font-style:italic;margin-top:2px">'+l.reason+'</div></div>';
+  }).join(''):'<div class="empty">No requests yet.</div>';
+}
+
+// ── ANALYTICS ─────────────────────────────────────────────────────────
+function renderAnalytics() {
+  var pct=attCount>0?Math.round((attCount/20)*100):0;
+  $('an-att').textContent=attCount; $('an-pct').textContent=pct+'%'; $('an-pct-b').textContent=pct+'%';
+  var bar=$('an-bar'); bar.style.width=pct+'%'; bar.className='pb'+(pct<75&&pct>0?' rd':'');
+  $('an-lbl').textContent=attCount+' of 20 classes attended';
+  $('subj-bars').innerHTML=SUBJECTS.map(function(s){
+    return '<div class="bar-row"><div class="bar-lbl">'+s.n+'</div><div class="bar-tr"><div class="bar-fi'+(s.p<75?' low':'')+'" style="width:'+s.p+'%"></div></div><div class="bar-val" style="color:'+(s.p<75?'var(--red)':'var(--t2)')+'">'+s.p+'%</div></div>';
+  }).join('');
+  asgns=lsGet(LS_ASGN_KEY)||[];
+  var myAsgns=asgns.filter(function(a){ return a.student_id===(ME&&ME.id); });
+  var ap=Math.min(100,Math.round((myAsgns.length/10)*100));
+  $('asgn-prog').style.width=ap+'%'; $('ap-lbl').textContent=myAsgns.length+' of 10 ('+ap+'%)';
+}
+
+// ── SCHEDULER ─────────────────────────────────────────────────────────
+function renderScheduler() {
+  var tc={class:'var(--blue)',lab:'var(--green)',break:'var(--t4)',tutorial:'var(--purple)'};
+  $('timetable').innerHTML=TT.map(function(t){
+    var fac=t.fid?getFacultyForCourse(t.n):null;
+    return '<div style="display:flex;gap:11px;padding:8px 11px;background:var(--surf);border:1px solid var(--b);border-left:2px solid '+(tc[t.tp]||'var(--blue)')+';border-radius:var(--rs);margin-bottom:5px">'
+      +'<div style="font-family:var(--mono);font-size:10px;color:var(--t3);min-width:100px">'+t.t+'</div>'
+      +'<div><div style="font-size:12px;font-weight:600">'+t.n+'</div>'
+      +'<div style="font-size:10px;color:var(--t3)">'+t.r+' · '+t.tp+(fac?' · <span style="color:var(--amber)">'+fac.name+'</span>':'')+'</div></div></div>';
+  }).join('');
+  if (!reminders.length) reminders=[
+    {title:'SE Assignment Submission',date:'May 10, 23:59',type:'Assignment',urgent:true},
+    {title:'End-Sem: Machine Learning',date:'May 10, 09:00',type:'Exam',urgent:true}
+  ];
+  $('rem-badge').textContent=reminders.filter(function(r){ return r.urgent; }).length;
+  $('rem-list').innerHTML=reminders.map(function(r){
+    return '<div style="display:flex;align-items:center;gap:11px;padding:8px 11px;background:var(--surf);border:1px solid '+(r.urgent?'rgba(245,158,11,.2)':'var(--b)')+';border-radius:var(--rs);margin-bottom:5px'+(r.urgent?';background:var(--adim)':'')+'"><div style="flex:1"><div style="font-size:12px;font-weight:600">'+r.title+'</div><div style="font-size:10px;color:var(--t3);font-family:var(--mono)">'+r.date+'</div></div>'+(r.urgent?'<span class="badge br">Urgent</span>':'')+'</div>';
+  }).join('');
+}
+
+function addReminder() {
+  var t=$('rem-t').value.trim(),d=$('rem-dt').value,cat=$('rem-cat').value;
+  if(!t||!d){ toast('Enter title and date/time','var(--red)'); return; }
+  var dt=new Date(d);
+  reminders.unshift({title:t,date:dt.toLocaleString('en-IN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}),type:cat,urgent:(dt-new Date())<172800000});
+  $('rem-t').value=''; $('rem-dt').value=''; renderScheduler(); toast('Reminder set','var(--blue)');
+}
+
+// ── FACULTY DIRECTORY ─────────────────────────────────────────────────
+function renderFac() {
+  var q=($('fac-srch')?$('fac-srch').value:'').toLowerCase();
+  var dept=$('fac-dept')?$('fac-dept').value:'';
+  var users=lsGet(LS_USERS_KEY)||DEMO_USERS;
+  var data=users.filter(function(u){ return u.role==='faculty'; }).filter(function(f){
+    var fc=f.courses||[]; var fDept=f.dept||'';
+    return (!q||(f.name.toLowerCase().includes(q)||fc.some(function(c){return c.toLowerCase().includes(q);})||fDept.toLowerCase().includes(q)))
+        && (!dept||fDept===dept);
+  });
+  $('fac-grid').innerHTML=data.length?data.map(function(f){
+    var initials=f.name.split(' ').filter(function(w){ return /^[A-Z]/.test(w); }).map(function(w){ return w[0]; }).join('').substring(0,2);
+    return '<div class="fac-c"><div class="fac-top"><div class="fac-av">'+initials+'</div>'
+      +'<div class="fac-n">'+f.name+'</div><div class="fac-t">'+(f.title||'Faculty')+'</div>'
+      +'<span class="badge bb">'+(f.dept||'—')+'</span></div>'
+      +'<div class="fac-bd"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">'
+      +'<span style="color:var(--t3)">Rating</span><span style="font-weight:600;font-family:var(--mono)">'+(f.rating||4.5)+'/5.0</span></div>'
+      +'<div style="font-size:10px;color:var(--t3);border-top:1px solid var(--b);padding-top:7px;margin-bottom:8px">'
+      +(f.courses||[]).map(function(c){ return '<span class="badge bb" style="margin:1px;font-size:9px">'+c+'</span>'; }).join('')+'</div>'
+      +'<div style="font-size:10px;color:var(--t3);font-family:var(--mono);margin-bottom:8px">'+f.email+'</div>'
+      +'<button class="btn bol bsm bfw" onclick="toast(\'Contact request sent to '+f.name+'\',\'var(--blue)\')">Contact</button>'
+      +'</div></div>';
+  }).join(''):'<div class="empty" style="grid-column:1/-1">No faculty found.</div>';
+}
+
+// ── TEACHER PANEL ─────────────────────────────────────────────────────
+function renderTeacher() {
+  if (!ME || ME.role!=='faculty') return;
+  // Load all assignments for faculty's courses
+  asgns=lsGet(LS_ASGN_KEY)||[];
+  var myAsgns=asgns.filter(function(a){ return a.faculty_id===ME.id; });
+  $('tp-asgn-count').textContent=myAsgns.length;
+  $('tp-asgn-list').innerHTML=myAsgns.length?myAsgns.slice().reverse().map(function(a){
+    return '<div class="ri"><div style="flex:1"><div style="font-weight:600">'+a.title+'</div>'
+      +'<div style="font-size:10px;color:var(--t3)">'+a.course+' · '+a.student_name+' · '+new Date(a.submitted_at).toLocaleDateString('en-IN')+'</div>'
+      +(a.grade!=='—'?'<div style="font-size:10px;color:var(--green)">Graded: '+a.grade+'</div>':'')
+      +'</div>'
+      +'<select onchange="gradeIt('+a.id+',this.value)" class="inp" style="width:80px;padding:4px 6px;font-size:11px">'
+      +'<option value="">'+a.grade+'</option><option>A+</option><option>A</option><option>B+</option><option>B</option><option>C</option><option>F</option>'
+      +'</select></div>';
+  }).join(''):'<div class="empty">No submissions for your courses.</div>';
+
+  // Enrolled faces
+  var db=faceDB(), enrolled=Object.values(db);
+  $('enrolled-count').textContent=enrolled.length;
+  $('enrolled-list').innerHTML=enrolled.length?enrolled.map(function(f){
+    return '<div class="ri"><div style="flex:1"><div style="font-weight:600">'+f.name+'</div><div style="font-size:10px;color:var(--t3);font-family:var(--mono)">'+f.email+'</div></div><span class="badge bg">Enrolled</span></div>';
+  }).join(''):'<div class="empty">No faces enrolled yet.</div>';
+}
+
+function genCode() {
+  var course=$('sess-course').value;
+  var chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  var code=Array.from({length:6},function(){ return chars[Math.floor(Math.random()*chars.length)]; }).join('');
+  $('code-val').textContent=code; $('code-sub').textContent=course+' — expires 90 min';
+  toast('Session '+code+' generated','var(--blue)');
+}
+
+function copyCode() {
+  var c=$('code-val').textContent.replace(/[\s—]/g,'');
+  if(c&&c!=='———'){ navigator.clipboard&&navigator.clipboard.writeText(c); toast('Code copied','var(--green)'); }
+}
+
+function clearEnrolledFaces() {
+  if (!confirm('Clear all enrolled face data?')) return;
+  lsSet(LS_FACES_KEY,{}); updateFaceUI();
+  toast('All face data cleared','var(--amber)'); renderTeacher();
+}
+
+// ── MODALS ────────────────────────────────────────────────────────────
+function openMod(id) {
+  $(id).classList.add('on');
+  if (id==='mod-grade') {
+    // Show only faculty's courses' assignments
+    asgns=lsGet(LS_ASGN_KEY)||[];
+    var myAsgns=ME&&ME.role==='faculty' ? asgns.filter(function(a){ return a.faculty_id===ME.id; }) : asgns;
+    $('grade-list').innerHTML=myAsgns.length?myAsgns.map(function(a){
+      return '<div class="ri"><div style="flex:1"><div style="font-weight:600">'+a.title+'</div>'
+        +'<div style="font-size:10px;color:var(--t3)">'+a.course+' · '+a.student_name+'</div></div>'
+        +'<select onchange="gradeIt('+a.id+',this.value)" class="inp" style="width:80px;padding:4px 6px;font-size:11px">'
+        +'<option>'+a.grade+'</option><option>A+</option><option>A</option><option>B+</option><option>B</option><option>C</option><option>F</option>'
+        +'</select></div>';
+    }).join(''):'<div class="empty">No submissions for your courses.</div>';
+  }
+  if (id==='mod-ans-doubts') {
+    var un=doubts.filter(function(d){ return !d.answered; });
+    $('ans-doubts-list').innerHTML=un.length?un.slice(0,5).map(function(d){
+      return '<div class="doubt-c" style="margin-bottom:10px"><div class="doubt-q">'+d.question+'</div>'
+        +'<textarea class="inp" id="ans-'+d.id+'" placeholder="Answer..." style="min-height:56px;margin:8px 0 6px"></textarea>'
+        +'<button class="btn bbl bsm" onclick="ansDoubt('+d.id+')">Post Answer</button></div>';
+    }).join(''):'<div class="empty">All doubts answered.</div>';
+  }
+  if (id==='mod-leave-mgmt') {
+    leaves=lsGet(LS_LEAVES_KEY)||[];
+    var pendingLeaves=leaves.filter(function(l){ return l.status==='Pending'; });
+    $('leave-mgmt-list').innerHTML=pendingLeaves.length?pendingLeaves.map(function(l){
+      return '<div style="background:var(--surf);border:1px solid var(--b);border-radius:var(--rs);padding:11px;margin-bottom:6px">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center"><div>'
+        +'<div style="font-weight:600">'+l.leave_type+' — '+(l.student_name||'Student')+'</div>'
+        +'<div style="font-size:10px;color:var(--t3);font-family:var(--mono)">'+l.from_date+' to '+l.to_date+'</div></div>'
+        +'<span class="badge ba">Pending</span></div>'
+        +'<div style="font-size:11px;color:var(--t3);font-style:italic;margin:5px 0">'+l.reason+'</div>'
+        +'<div style="display:flex;gap:6px"><button class="btn bgr bsm" onclick="reviewLeave('+l.id+',\'Approved\')">Approve</button>'
+        +'<button class="btn brd bsm" onclick="reviewLeave('+l.id+',\'Rejected\')">Reject</button></div></div>';
+    }).join(''):'<div class="empty">No pending requests.</div>';
+  }
+}
+
+function closeMod(id) {
+  $(id).classList.remove('on');
+  if (id==='mod-face-enroll'){ stopLiveDetection('enroll-vid'); stopStream(enrollStream); enrollStream=null; }
+}
+
+// Grade updates go to SHARED assignment list → student sees it in their panel
+function gradeIt(asgnId, grade) {
+  if (!grade || grade==='—') return;
+  asgns=lsGet(LS_ASGN_KEY)||[];
+  var idx=asgns.findIndex(function(a){ return a.id===asgnId; });
+  if (idx>-1) {
+    asgns[idx].grade=grade;
+    asgns[idx].graded_by=ME?ME.id:null;
+    asgns[idx].graded_by_name=ME?ME.name:null;
+    lsSet(LS_ASGN_KEY,asgns);
+    toast('Graded: '+grade,'var(--green)');
+    renderTeacher();
+  }
+}
+
+function ansDoubt(id) {
+  var ta=$('ans-'+id); if(!ta||!ta.value.trim()){ toast('Enter an answer','var(--red)'); return; }
+  var d=doubts.find(function(x){ return x.id===id; });
+  if(d){ d.answer=ta.value.trim(); d.answered=true; }
+  lsSet(LS_DOUBTS_KEY,doubts); $('nb-doubts').textContent=doubts.filter(function(x){return !x.answered;}).length;
+  closeMod('mod-ans-doubts'); renderDoubts(); toast('Answer posted','var(--green)');
+}
+
+// Leave review updates shared LS → student sees status immediately
+function reviewLeave(leaveId, status) {
+  leaves=lsGet(LS_LEAVES_KEY)||[];
+  var idx=leaves.findIndex(function(l){ return l.id===leaveId; });
+  if(idx>-1){
+    leaves[idx].status=status;
+    leaves[idx].reviewed_by=ME?ME.id:null;
+    leaves[idx].reviewed_at=new Date().toISOString();
+    lsSet(LS_LEAVES_KEY,leaves);
+  }
+  closeMod('mod-leave-mgmt'); renderLeaves(); renderDash();
+  toast('Leave '+status.toLowerCase(), status==='Approved'?'var(--green)':'var(--amber)');
+}
+
+function createPoll() {
+  var q=$('poll-q').value.trim();
+  var opts=[$('poll-o1'),$('poll-o2'),$('poll-o3')].map(function(e){ return e.value.trim(); }).filter(Boolean);
+  if(!q||opts.length<2){ toast('Need question + 2 options','var(--red)'); return; }
+  var p={id:Date.now(),question:q,options:opts,votes:opts.map(function(){ return 0; }),my_vote:null};
+  polls.unshift(p); lsSet(LS_POLLS_KEY,polls);
+  $('poll-ok').textContent='Poll launched!'; $('poll-ok').style.display='block';
+  setTimeout(function(){
+    $('poll-ok').style.display='none'; closeMod('mod-poll');
+    [$('poll-q'),$('poll-o1'),$('poll-o2'),$('poll-o3')].forEach(function(e){ e.value=''; });
+  },1800);
+  renderPolls();
+}
+
+function postAnn() {
+  var t=$('ann-t').value.trim(), b=$('ann-b').value.trim(), p=$('ann-p').value;
+  if(!t||!b){ toast('Title and message required','var(--red)'); return; }
+  anns.unshift({id:Date.now(),title:t,body:b,priority:p,by:ME&&ME.name,at:new Date().toISOString()});
+  lsSet(LS_ANNS_KEY,anns);
+  $('ann-ok').textContent='Posted!'; $('ann-ok').style.display='block';
+  setTimeout(function(){ $('ann-ok').style.display='none'; closeMod('mod-announce'); $('ann-t').value=''; $('ann-b').value=''; },1800);
+  renderAnns(); renderDash();
+}
+
+// ── KEYBOARD & CLICK OUTSIDE ──────────────────────────────────────────
+document.addEventListener('keydown', function(e){
+  if(e.key==='Escape') document.querySelectorAll('.mov.on').forEach(function(m){ closeMod(m.id); });
+});
+document.querySelectorAll('.mov').forEach(function(m){
+  m.addEventListener('click', function(e){ if(e.target===m) closeMod(m.id); });
+});
+
+// ── INIT ──────────────────────────────────────────────────────────────
+initDemoUsers();
+loadInsts();
+// Preload Face API in background only if HTTP (not file://)
+if (!isFileProtocol()) setTimeout(function(){ loadFaceApi(); }, 2000);
+</script>
+</body>
+</html>
