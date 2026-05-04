@@ -4,22 +4,22 @@
 // ============================================================
 require("dotenv").config();
 
-const express    = require("express");
-const http       = require("http");
-const cors       = require("cors");
-const helmet     = require("helmet");
-const morgan     = require("morgan");
-const { Pool }   = require("pg");
-const redis      = require("redis");
-const jwt        = require("jsonwebtoken");
-const bcrypt     = require("bcryptjs");
+const express = require("express");
+const http = require("http");
+const cors = require("cors");
+const helmet = require("helmet");
+const morgan = require("morgan");
+const { Pool } = require("pg");
+const redis = require("redis");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const { Server } = require("socket.io");
-const multer     = require("multer");
-const path       = require("path");
-const crypto     = require("crypto");
-const QRCode     = require("qrcode");
+const multer = require("multer");
+const path = require("path");
+const crypto = require("crypto");
+const QRCode = require("qrcode");
 
-const app    = express();
+const app = express();
 const server = http.createServer(app);
 
 // ── Middleware ────────────────────────────────────────────
@@ -32,11 +32,11 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // ── PostgreSQL ────────────────────────────────────────────
 const db = new Pool({
-  host:     process.env.DB_HOST     || "localhost",
-  port:     parseInt(process.env.DB_PORT || "5432"),
-  user:     process.env.DB_USER     || "postgres",
+  host: process.env.DB_HOST || "localhost",
+  port: parseInt(process.env.DB_PORT || "5432"),
+  user: process.env.DB_USER || "postgres",
   password: process.env.DB_PASSWORD || "postgres",
-  database: process.env.DB_NAME     || "educore",
+  database: process.env.DB_NAME || "educore",
   max: 20,
 });
 db.connect()
@@ -46,10 +46,10 @@ db.connect()
 // ── Redis ─────────────────────────────────────────────────
 const redisClient = redis.createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
 let redisReady = false;
-redisClient.on("connect",      () => { redisReady = true;  console.log("[Redis] Connected"); });
-redisClient.on("ready",        () => { redisReady = true; });
-redisClient.on("end",          () => { redisReady = false; });
-redisClient.on("error",        () => { redisReady = false; });
+redisClient.on("connect", () => { redisReady = true; console.log("[Redis] Connected"); });
+redisClient.on("ready", () => { redisReady = true; });
+redisClient.on("end", () => { redisReady = false; });
+redisClient.on("error", () => { redisReady = false; });
 redisClient.on("reconnecting", () => { redisReady = false; });
 (async () => {
   try { await redisClient.connect(); }
@@ -57,16 +57,16 @@ redisClient.on("reconnecting", () => { redisReady = false; });
 })();
 
 const CACHE_TTL = 300;
-async function cacheGet(k)           { if (!redisReady) return null; try { const v = await redisClient.get(k); return v ? JSON.parse(v) : null; } catch { return null; } }
-async function cacheSet(k, v, t=CACHE_TTL) { if (!redisReady) return; try { await redisClient.setEx(k, t, JSON.stringify(v)); } catch {} }
-async function cacheDel(k)           { if (!redisReady) return; try { await redisClient.del(k); } catch {} }
-async function cacheDelPattern(p)    { if (!redisReady) return; try { const ks = await redisClient.keys(p); if (ks.length) await redisClient.del(ks); } catch {} }
+async function cacheGet(k) { if (!redisReady) return null; try { const v = await redisClient.get(k); return v ? JSON.parse(v) : null; } catch { return null; } }
+async function cacheSet(k, v, t = CACHE_TTL) { if (!redisReady) return; try { await redisClient.setEx(k, t, JSON.stringify(v)); } catch { } }
+async function cacheDel(k) { if (!redisReady) return; try { await redisClient.del(k); } catch { } }
+async function cacheDelPattern(p) { if (!redisReady) return; try { const ks = await redisClient.keys(p); if (ks.length) await redisClient.del(ks); } catch { } }
 
 // ── Socket.io ─────────────────────────────────────────────
 const io = new Server(server, { cors: { origin: "*" } });
 const activeSessions = {};
 io.on("connection", socket => {
-  socket.on("session:join",   ({ code }) => {
+  socket.on("session:join", ({ code }) => {
     if (activeSessions[code]) { socket.join(`sess:${code}`); socket.emit("session:joined", activeSessions[code]); }
     else socket.emit("session:invalid");
   });
@@ -75,22 +75,22 @@ io.on("connection", socket => {
     socket.join(`sess:${code}`);
     io.emit("session:available", { code, course });
   });
-  socket.on("doubt:post",        d  => { io.to(`sess:${d.session_code}`).emit("doubt:new", d); io.emit("doubt:board:update", d); });
-  socket.on("doubt:answer",      ev => { io.emit("doubt:answered", ev); });
-  socket.on("poll:create",       p  => { io.emit("poll:new", p); });
-  socket.on("poll:vote",         ev => { io.emit("poll:vote:update", ev); });
-  socket.on("announcement:post", a  => { io.emit("announcement:new", a); });
-  socket.on("join:user",         ({ userId }) => socket.join(`user:${userId}`));
-  socket.on("attendance:marked", d  => io.emit("attendance:update", d));
+  socket.on("doubt:post", d => { io.to(`sess:${d.session_code}`).emit("doubt:new", d); io.emit("doubt:board:update", d); });
+  socket.on("doubt:answer", ev => { io.emit("doubt:answered", ev); });
+  socket.on("poll:create", p => { io.emit("poll:new", p); });
+  socket.on("poll:vote", ev => { io.emit("poll:vote:update", ev); });
+  socket.on("announcement:post", a => { io.emit("announcement:new", a); });
+  socket.on("join:user", ({ userId }) => socket.join(`user:${userId}`));
+  socket.on("attendance:marked", d => io.emit("attendance:update", d));
 });
 
 // ── JWT ───────────────────────────────────────────────────
-const JWT_SECRET  = process.env.JWT_SECRET  || "educore-secret";
+const JWT_SECRET = process.env.JWT_SECRET || "educore-secret";
 const JWT_REFRESH = process.env.JWT_REFRESH || "educore-refresh";
 
 function generateTokens(payload) {
   return {
-    accessToken:  jwt.sign(payload, JWT_SECRET,  { expiresIn: "1h" }),
+    accessToken: jwt.sign(payload, JWT_SECRET, { expiresIn: "1h" }),
     refreshToken: jwt.sign({ id: payload.id }, JWT_REFRESH, { expiresIn: "7d" }),
   };
 }
@@ -103,7 +103,7 @@ function authMiddleware(req, res, next) {
     next();
   } catch (e) {
     res.status(e.name === "TokenExpiredError" ? 401 : 403)
-       .json({ error: e.name === "TokenExpiredError" ? "Token expired" : "Invalid token" });
+      .json({ error: e.name === "TokenExpiredError" ? "Token expired" : "Invalid token" });
   }
 }
 
@@ -237,7 +237,7 @@ ON CONFLICT (abbr) DO UPDATE SET image_url = EXCLUDED.image_url`,
     catch (e) { console.warn("[DB] Migration warning:", e.message.split("\n")[0]); warns++; }
   }
   console.log(`[DB] Schema initialised${warns ? ` with ${warns} warning(s)` : ""}`);
-  await seedDemoUsers();
+  // await seedDemoUsers();
 }
 
 async function seedDemoUsers() {
@@ -247,21 +247,21 @@ async function seedDemoUsers() {
   if (!instId) return;
 
   const users = [
-    { name: "Chandrika",         email: "se23uari002@mu.edu", roll_no: "SE23UARI002", role: "student" },
-    { name: "Varshitha",         email: "se23uari022@mu.edu", roll_no: "SE23UARI022", role: "student" },
-    { name: "Havishya",          email: "se23uari098@mu.edu", roll_no: "SE23UARI098", role: "student" },
-    { name: "Subba Rao",         email: "se23uari068@mu.edu", roll_no: "SE23UARI068", role: "student" },
-    { name: "Ramaraju",          email: "se23uari024@mu.edu", roll_no: "SE23UARI024", role: "student" },
-    { name: "Hrishikeswar Reddy",email: "se23uari036@mu.edu", roll_no: "SE23UARI036", role: "student" },
-    { name: "Krushith Rao",      email: "se23ucse227@mu.edu", roll_no: "SE23UCSE227", role: "student" },
-    { name: "Vidhur Rao",        email: "se23ucse207@mu.edu", roll_no: "SE23UCSE207", role: "student" },
-    { name: "Dr. Narthkannai",   email: "narthkannai@mu.edu", roll_no: null,           role: "faculty" },
-    { name: "Dr. Ramesh Babu",   email: "ramesh.babu@mu.edu", roll_no: null,           role: "faculty" },
-    { name: "Prof. Sunitha Rani",email: "sunitha.rani@mu.edu",roll_no: null,           role: "faculty" },
-    { name: "Dr. Venkat Prasad", email: "venkat.prasad@mu.edu",roll_no: null,          role: "faculty" },
-    { name: "Prof. Lakshmi Devi",email: "lakshmi.devi@mu.edu",roll_no: null,           role: "faculty" },
-    { name: "Dr. Kiran Sai",     email: "kiran.sai@mu.edu",   roll_no: null,           role: "faculty" },
-    { name: "Prof. Aruna Kumari",email: "aruna.kumari@mu.edu",roll_no: null,           role: "faculty" },
+    { name: "Chandrika", email: "se23uari002@mu.edu", roll_no: "SE23UARI002", role: "student" },
+    { name: "Varshitha", email: "se23uari022@mu.edu", roll_no: "SE23UARI022", role: "student" },
+    { name: "Havishya", email: "se23uari098@mu.edu", roll_no: "SE23UARI098", role: "student" },
+    { name: "Subba Rao", email: "se23uari068@mu.edu", roll_no: "SE23UARI068", role: "student" },
+    { name: "Ramaraju", email: "se23uari024@mu.edu", roll_no: "SE23UARI024", role: "student" },
+    { name: "Hrishikeswar Reddy", email: "se23uari036@mu.edu", roll_no: "SE23UARI036", role: "student" },
+    { name: "Krushith Rao", email: "se23ucse227@mu.edu", roll_no: "SE23UCSE227", role: "student" },
+    { name: "Vidhur Rao", email: "se23ucse207@mu.edu", roll_no: "SE23UCSE207", role: "student" },
+    { name: "Dr. Narthkannai", email: "narthkannai@mu.edu", roll_no: null, role: "faculty" },
+    { name: "Dr. Ramesh Babu", email: "ramesh.babu@mu.edu", roll_no: null, role: "faculty" },
+    { name: "Prof. Sunitha Rani", email: "sunitha.rani@mu.edu", roll_no: null, role: "faculty" },
+    { name: "Dr. Venkat Prasad", email: "venkat.prasad@mu.edu", roll_no: null, role: "faculty" },
+    { name: "Prof. Lakshmi Devi", email: "lakshmi.devi@mu.edu", roll_no: null, role: "faculty" },
+    { name: "Dr. Kiran Sai", email: "kiran.sai@mu.edu", roll_no: null, role: "faculty" },
+    { name: "Prof. Aruna Kumari", email: "aruna.kumari@mu.edu", roll_no: null, role: "faculty" },
   ];
 
   for (const u of users) {
@@ -276,29 +276,29 @@ async function seedDemoUsers() {
   const facId = fac.rows[0]?.id;
   if (facId) {
     const anns = [
-      ["Mid-Semester Examination Schedule","Mid-semester exams commence March 25. Hall tickets on portal. Bring ID card.","Important"],
-      ["Campus Network Maintenance","WiFi unavailable Sunday 22:00–Monday 06:00 for infrastructure upgrades.","Normal"],
-      ["EduHack 2026 — Registrations Open","Teams of 2–4. Deadline: March 30. Prize pool ₹2,00,000.","Normal"],
+      ["Mid-Semester Examination Schedule", "Mid-semester exams commence March 25. Hall tickets on portal. Bring ID card.", "Important"],
+      ["Campus Network Maintenance", "WiFi unavailable Sunday 22:00–Monday 06:00 for infrastructure upgrades.", "Normal"],
+      ["EduHack 2026 — Registrations Open", "Teams of 2–4. Deadline: March 30. Prize pool ₹2,00,000.", "Normal"],
     ];
     for (const [title, body, priority] of anns) {
       await db.query(
         `INSERT INTO announcements (institution_id,posted_by,title,body,priority) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
         [instId, facId, title, body, priority]
-      ).catch(() => {});
+      ).catch(() => { });
     }
     const calEvents = [
-      ["Holi — National Holiday","2026-03-21","holiday","CIRC/2026/031"],
-      ["Mid-Sem: Machine Learning","2026-03-25","exam",null],
-      ["Mid-Sem: Software Engineering","2026-03-26","exam",null],
-      ["Good Friday","2026-03-28","holiday","CIRC/2026/028"],
-      ["Mid-Sem: Computer Networks","2026-04-01","exam",null],
-      ["Dr. Ambedkar Jayanti","2026-04-14","holiday","CIRC/2026/041"],
+      ["Holi — National Holiday", "2026-03-21", "holiday", "CIRC/2026/031"],
+      ["Mid-Sem: Machine Learning", "2026-03-25", "exam", null],
+      ["Mid-Sem: Software Engineering", "2026-03-26", "exam", null],
+      ["Good Friday", "2026-03-28", "holiday", "CIRC/2026/028"],
+      ["Mid-Sem: Computer Networks", "2026-04-01", "exam", null],
+      ["Dr. Ambedkar Jayanti", "2026-04-14", "holiday", "CIRC/2026/041"],
     ];
     for (const [title, date, type, circ] of calEvents) {
       await db.query(
         `INSERT INTO calendar_events (institution_id,title,event_date,event_type,circular_no,created_by) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
         [instId, title, date, type, circ, facId]
-      ).catch(() => {});
+      ).catch(() => { });
     }
   }
   await db.query(`UPDATE institutions SET image_url='https://images.unsplash.com/photo-1562774053-701939374585?w=800&q=80' WHERE abbr='MU'`);
@@ -346,11 +346,11 @@ app.post("/api/auth/login", async (req, res) => {
     const input = email.trim();
 
     // Determine what was typed: email or roll number
-    const isEmail   = input.includes("@");
+    const isEmail = input.includes("@");
     // Email to query: if roll no typed without @, append @mu.edu so the email column matches
-    const emailVal  = isEmail ? input.toLowerCase() : `${input.toLowerCase()}@mu.edu`;
+    const emailVal = isEmail ? input.toLowerCase() : `${input.toLowerCase()}@mu.edu`;
     // Roll no to query: always the raw input uppercased (roll_no column stores uppercase)
-    const rollVal   = input.toUpperCase();
+    const rollVal = input.toUpperCase();
 
     // FIX: Use TWO separate params — $1 for email, $2 for roll_no
     // This way each column gets the correctly formatted value
@@ -373,29 +373,29 @@ app.post("/api/auth/login", async (req, res) => {
     if (!valid) return res.status(401).json({ error: "Invalid credentials — wrong password" });
 
     const payload = { id: user.id, email: user.email, name: user.name, role: user.role, inst: user.inst_abbr };
-    const tokens  = generateTokens(payload);
+    const tokens = generateTokens(payload);
 
     await db.query("UPDATE users SET refresh_token=$1 WHERE id=$2", [tokens.refreshToken, user.id]);
     await cacheSet(`session:${user.id}`, { ...payload, inst_name: user.inst_name, inst_loc: user.inst_loc }, 3600);
     await db.query(
       "INSERT INTO notifications (user_id,message,type) VALUES ($1,$2,$3)",
       [user.id, "Signed in successfully.", "info"]
-    ).catch(() => {});
+    ).catch(() => { });
 
     res.json({
       ...tokens,
       user: {
-        id:                   user.id,
-        name:                 user.name,
-        email:                user.email,
-        role:                 user.role,
-        roll_no:              user.roll_no,
-        inst:                 user.inst_abbr,
-        inst_name:            user.inst_name,
-        inst_loc:             user.inst_loc,
-        inst_img:             user.inst_img,
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        roll_no: user.roll_no,
+        inst: user.inst_abbr,
+        inst_name: user.inst_name,
+        inst_loc: user.inst_loc,
+        inst_img: user.inst_img,
         must_change_password: user.must_change_password,
-        has_face:             !!user.face_vector,
+        has_face: !!user.face_vector,
       },
     });
   } catch (e) {
@@ -435,14 +435,14 @@ app.post("/api/auth/face/login", async (req, res) => {
         // Euclidean distance — lower is better
         const dist = Math.sqrt(stored.reduce((sum, v, i) => sum + (v - input[i]) ** 2, 0));
         if (dist < bestScore) { bestScore = dist; best = row; }
-      } catch {}
+      } catch { }
     }
     // Threshold: euclidean distance < 0.6 is a match (face-api.js convention)
     if (!best || bestScore > 0.6) {
       return res.status(401).json({ error: "Face not recognised. Log in with roll number first." });
     }
     const payload = { id: best.id, email: best.email, name: best.name, role: best.role, inst: best.inst_abbr };
-    const tokens  = generateTokens(payload);
+    const tokens = generateTokens(payload);
     await db.query("UPDATE users SET refresh_token=$1 WHERE id=$2", [tokens.refreshToken, best.id]);
     await cacheSet(`session:${best.id}`, payload, 3600);
     res.json({
@@ -462,11 +462,11 @@ app.post("/api/auth/refresh", async (req, res) => {
   if (!refreshToken) return res.status(400).json({ error: "Refresh token required" });
   try {
     const decoded = jwt.verify(refreshToken, JWT_REFRESH);
-    const result  = await db.query("SELECT * FROM users WHERE id=$1 AND refresh_token=$2", [decoded.id, refreshToken]);
+    const result = await db.query("SELECT * FROM users WHERE id=$1 AND refresh_token=$2", [decoded.id, refreshToken]);
     if (!result.rows.length) return res.status(403).json({ error: "Invalid refresh token" });
-    const user    = result.rows[0];
+    const user = result.rows[0];
     const payload = { id: user.id, email: user.email, name: user.name, role: user.role };
-    const tokens  = generateTokens(payload);
+    const tokens = generateTokens(payload);
     await db.query("UPDATE users SET refresh_token=$1 WHERE id=$2", [tokens.refreshToken, user.id]);
     res.json(tokens);
   } catch { res.status(403).json({ error: "Invalid refresh token" }); }
@@ -517,11 +517,11 @@ app.post("/api/sessions", authMiddleware, facultyOnly, async (req, res) => {
   const { course } = req.body;
   if (!course) return res.status(400).json({ error: "course required" });
   try {
-    const chars     = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    const code      = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const code = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
     const expiresAt = new Date(Date.now() + 90 * 60 * 1000);
-    const userRow   = await db.query("SELECT institution_id FROM users WHERE id=$1", [req.user.id]);
-    const instId    = userRow.rows[0]?.institution_id;
+    const userRow = await db.query("SELECT institution_id FROM users WHERE id=$1", [req.user.id]);
+    const instId = userRow.rows[0]?.institution_id;
 
     const qrPayload = JSON.stringify({ code, course, ts: Date.now() });
     const qrDataUrl = await QRCode.toDataURL(qrPayload, {
@@ -540,7 +540,7 @@ app.post("/api/sessions", authMiddleware, facultyOnly, async (req, res) => {
 });
 
 app.get("/api/sessions/validate/:code", authMiddleware, async (req, res) => {
-  const code   = req.params.code.toUpperCase();
+  const code = req.params.code.toUpperCase();
   const cached = await cacheGet(`session_code:${code}`);
   if (cached) return res.json({ valid: true, data: cached });
   const r = await db.query("SELECT * FROM session_codes WHERE code=$1 AND expires_at>NOW()", [code]);
@@ -551,7 +551,7 @@ app.get("/api/sessions/validate/:code", authMiddleware, async (req, res) => {
 
 app.get("/api/sessions/:code/qr", authMiddleware, async (req, res) => {
   const code = req.params.code.toUpperCase();
-  const r    = await db.query("SELECT qr_data FROM session_codes WHERE code=$1 AND expires_at>NOW()", [code]);
+  const r = await db.query("SELECT qr_data FROM session_codes WHERE code=$1 AND expires_at>NOW()", [code]);
   if (!r.rows.length) return res.status(404).json({ error: "Session not found or expired" });
   res.json({ qr: r.rows[0].qr_data });
 });
@@ -572,14 +572,14 @@ app.post("/api/attendance", authMiddleware, async (req, res) => {
     await cacheDel(`attendance:${req.user.id}`);
     await cacheDel(`analytics:${req.user.id}`);
     await db.query("INSERT INTO notifications (user_id,message,type) VALUES ($1,$2,$3)",
-      [req.user.id, `Attendance marked for session ${session_code}`, "success"]).catch(() => {});
+      [req.user.id, `Attendance marked for session ${session_code}`, "success"]).catch(() => { });
     io.emit("attendance:marked", { studentId: req.user.id, session: session_code });
     res.json({ data: r.rows[0] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/api/attendance", authMiddleware, async (req, res) => {
-  const sid    = req.user.role === "faculty" ? (req.query.student_id || req.user.id) : req.user.id;
+  const sid = req.user.role === "faculty" ? (req.query.student_id || req.user.id) : req.user.id;
   const cached = await cacheGet(`attendance:${sid}`);
   if (cached) return res.json({ data: cached, cached: true });
   const r = await db.query(
@@ -591,14 +591,14 @@ app.get("/api/attendance", authMiddleware, async (req, res) => {
 });
 
 app.get("/api/analytics", authMiddleware, async (req, res) => {
-  const sid    = req.user.role === "faculty" ? (req.query.student_id || req.user.id) : req.user.id;
+  const sid = req.user.role === "faculty" ? (req.query.student_id || req.user.id) : req.user.id;
   const cached = await cacheGet(`analytics:${sid}`);
   if (cached) return res.json({ data: cached, cached: true });
-  const total  = 20;
-  const r      = await db.query("SELECT COUNT(*) AS attended FROM attendance WHERE student_id=$1", [sid]);
-  const attended   = parseInt(r.rows[0].attended);
+  const total = 20;
+  const r = await db.query("SELECT COUNT(*) AS attended FROM attendance WHERE student_id=$1", [sid]);
+  const attended = parseInt(r.rows[0].attended);
   const percentage = Math.round((attended / total) * 100);
-  const data   = { total, attended, percentage, below75: percentage < 75 };
+  const data = { total, attended, percentage, below75: percentage < 75 };
   await cacheSet(`analytics:${sid}`, data, 60);
   res.json({ data });
 });
@@ -640,7 +640,7 @@ app.post("/api/assignments", authMiddleware, upload.single("file"), async (req, 
 });
 
 app.get("/api/assignments", authMiddleware, async (req, res) => {
-  const sid    = req.user.role === "faculty" ? req.query.student_id : req.user.id;
+  const sid = req.user.role === "faculty" ? req.query.student_id : req.user.id;
   const cached = await cacheGet(`assignments:${sid}`);
   if (cached) return res.json({ data: cached, cached: true });
   const r = await db.query("SELECT * FROM assignments WHERE student_id=$1 ORDER BY submitted_at DESC", [sid]);
@@ -656,7 +656,7 @@ app.patch("/api/assignments/:id/grade", authMiddleware, facultyOnly, async (req,
   if (!r.rows.length) return res.status(404).json({ error: "Not found" });
   await cacheDel(`assignments:${r.rows[0].student_id}`);
   await db.query("INSERT INTO notifications (user_id,message,type) VALUES ($1,$2,$3)",
-    [r.rows[0].student_id, `Assignment "${r.rows[0].title}" graded: ${req.body.grade}`, "info"]).catch(() => {});
+    [r.rows[0].student_id, `Assignment "${r.rows[0].title}" graded: ${req.body.grade}`, "info"]).catch(() => { });
   res.json({ data: r.rows[0] });
 });
 
@@ -664,11 +664,11 @@ app.patch("/api/assignments/:id/grade", authMiddleware, facultyOnly, async (req,
 app.get("/api/doubts", authMiddleware, async (req, res) => {
   const { session, filter } = req.query;
   const cacheKey = `doubts:${session || "all"}:${filter || "all"}`;
-  const cached   = await cacheGet(cacheKey);
+  const cached = await cacheGet(cacheKey);
   if (cached) return res.json({ data: cached, cached: true });
   let where = "1=1"; const params = [];
   if (session) { params.push(session); where += ` AND session_code=$${params.length}`; }
-  if (filter === "answered")   where += " AND answered=TRUE";
+  if (filter === "answered") where += " AND answered=TRUE";
   if (filter === "unanswered") where += " AND answered=FALSE";
   const r = await db.query(
     `SELECT d.*,u.name AS answered_by_name FROM doubts d LEFT JOIN users u ON d.answered_by=u.id WHERE ${where} ORDER BY d.votes DESC,d.created_at DESC LIMIT 50`,
@@ -784,7 +784,7 @@ app.patch("/api/leaves/:id", authMiddleware, facultyOnly, async (req, res) => {
   if (!r.rows.length) return res.status(404).json({ error: "Not found" });
   await db.query("INSERT INTO notifications (user_id,message,type) VALUES ($1,$2,$3)",
     [r.rows[0].student_id, `Leave request ${status.toLowerCase()}`, status === "Approved" ? "success" : "warning"]
-  ).catch(() => {});
+  ).catch(() => { });
   res.json({ data: r.rows[0] });
 });
 
